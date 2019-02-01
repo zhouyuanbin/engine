@@ -1,4 +1,4 @@
-Signature: d68bfb7d611c1fba3baf92505429f3b6
+Signature: aecb9267437d920910219a31d2528626
 
 UNUSED LICENSES:
 
@@ -1334,7 +1334,6 @@ FILE: ../../../third_party/skia/src/compute/skc/styling.c
 FILE: ../../../third_party/skia/src/compute/skc/styling.h
 FILE: ../../../third_party/skia/src/compute/skc/styling_types.h
 FILE: ../../../third_party/skia/src/compute/skc/tile.h
-FILE: ../../../third_party/skia/src/core/Sk4x4f.h
 FILE: ../../../third_party/skia/src/core/SkATrace.cpp
 FILE: ../../../third_party/skia/src/core/SkATrace.h
 FILE: ../../../third_party/skia/src/core/SkAnnotationKeys.h
@@ -2172,6 +2171,7 @@ FILE: ../../../third_party/skia/animations/redcross#1.jpg
 FILE: ../../../third_party/skia/animations/text#1.xml
 FILE: ../../../third_party/skia/bench/microbench.json
 FILE: ../../../third_party/skia/bench/skpbench.json
+FILE: ../../../third_party/skia/docker/cmake-release/Dockerfile
 FILE: ../../../third_party/skia/docker/skia-release/Dockerfile
 FILE: ../../../third_party/skia/docker/skia-wasm-release/Dockerfile
 FILE: ../../../third_party/skia/docker/skia-with-swift-shader-base/Dockerfile
@@ -2317,6 +2317,7 @@ FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.ex
 FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.expected/Build-Debian9-Clang-x86_64-Debug-SafeStack.json
 FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.expected/Build-Debian9-Clang-x86_64-Debug-Tidy.json
 FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.expected/Build-Debian9-Clang-x86_64-Release-ASAN.json
+FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.expected/Build-Debian9-Clang-x86_64-Release-CMake.json
 FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.expected/Build-Debian9-Clang-x86_64-Release-Fast.json
 FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.expected/Build-Debian9-Clang-x86_64-Release-NoDEPS.json
 FILE: ../../../third_party/skia/infra/bots/recipe_modules/build/examples/full.expected/Build-Debian9-Clang-x86_64-Release-Static.json
@@ -2542,7 +2543,6 @@ FILE: ../../../third_party/skia/infra/bots/test_skia_bundled.isolate
 FILE: ../../../third_party/skia/infra/bots/tools/luci-go/linux64/isolate.sha1
 FILE: ../../../third_party/skia/infra/bots/tools/luci-go/mac64/isolate.sha1
 FILE: ../../../third_party/skia/infra/bots/tools/luci-go/win64/isolate.exe.sha1
-FILE: ../../../third_party/skia/infra/branch-config/cq.cfg
 FILE: ../../../third_party/skia/infra/config/recipes.cfg
 FILE: ../../../third_party/skia/infra/cts/whitelist_devices.json
 FILE: ../../../third_party/skia/infra/lottiecap/docker/gold-lottie-web-puppeteer/Dockerfile
@@ -5032,10 +5032,24 @@ LIBRARY: skia
 ORIGIN: ../../../third_party/skia/gm/skbug_8664.cpp + ../../../third_party/skia/LICENSE
 TYPE: LicenseType.bsd
 FILE: ../../../third_party/skia/gm/skbug_8664.cpp
+FILE: ../../../third_party/skia/include/gpu/GrContextThreadSafeProxy.h
+FILE: ../../../third_party/skia/include/private/GrContext_Base.h
+FILE: ../../../third_party/skia/include/private/GrImageContext.h
+FILE: ../../../third_party/skia/include/private/GrRecordingContext.h
 FILE: ../../../third_party/skia/modules/sksg/src/SkSGTransformPriv.h
+FILE: ../../../third_party/skia/samplecode/SampleThinAA.cpp
 FILE: ../../../third_party/skia/src/core/SkDescriptor.cpp
+FILE: ../../../third_party/skia/src/gpu/GrBaseContextPriv.h
+FILE: ../../../third_party/skia/src/gpu/GrContextThreadSafeProxy.cpp
+FILE: ../../../third_party/skia/src/gpu/GrContext_Base.cpp
+FILE: ../../../third_party/skia/src/gpu/GrImageContext.cpp
+FILE: ../../../third_party/skia/src/gpu/GrImageContextPriv.h
+FILE: ../../../third_party/skia/src/gpu/GrRecordingContext.cpp
+FILE: ../../../third_party/skia/src/gpu/GrRecordingContextPriv.h
 FILE: ../../../third_party/skia/src/gpu/vk/GrVkSecondaryCBDrawContext.cpp
 FILE: ../../../third_party/skia/src/gpu/vk/GrVkSecondaryCBDrawContext.h
+FILE: ../../../third_party/skia/src/sksl/SkSLDefines.h
+FILE: ../../../third_party/skia/src/sksl/SkSLOutputStream.cpp
 ----------------------------------------------------------------------------------------------------
 Copyright 2019 Google Inc.
 

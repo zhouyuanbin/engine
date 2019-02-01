@@ -59,6 +59,7 @@ struct Settings {
   bool start_paused = false;
   bool trace_skia = false;
   bool trace_startup = false;
+  bool trace_systrace = false;
   bool endless_trace_buffer = false;
   bool enable_dart_profiling = false;
   bool disable_dart_asserts = false;
@@ -104,6 +105,7 @@ struct Settings {
   bool verbose_logging = false;
   std::string log_tag = "flutter";
   std::string icu_data_path;
+  MappingCallback icu_mapper;
 
   // Assets settings
   fml::UniqueFD::element_type assets_dir =

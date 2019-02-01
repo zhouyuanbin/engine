@@ -24,7 +24,7 @@ typedef enum {
   kInvalidLibraryVersion,
   kInvalidArguments,
   kInternalInconsistency,
-} FlutterResult;
+} FlutterEngineResult;
 
 typedef enum {
   kOpenGL,
@@ -91,6 +91,12 @@ typedef struct {
   BoolCallback clear_current;
   BoolCallback present;
   UIntCallback fbo_callback;
+  // This is an optional callback. Flutter will ask the emebdder to create a GL
+  // context current on a background thread. If the embedder is able to do so,
+  // Flutter will assume that this context is in the same sharegroup as the main
+  // rendering context and use this context for asynchronous texture uploads.
+  // Though optional, it is recommended that all embedders set this callback as
+  // it will lead to better performance in texture handling.
   BoolCallback make_resource_current;
   // By default, the renderer config assumes that the FBO does not change for
   // the duration of the engine run. If this argument is true, the
@@ -103,7 +109,7 @@ typedef struct {
   ProcResolver gl_proc_resolver;
   // When the embedder specifies that a texture has a frame available, the
   // engine will call this method (on an internal engine managed thread) so that
-  // external texture details can be suppplied to the engine for subsequent
+  // external texture details can be supplied to the engine for subsequent
   // composition.
   TextureFrameCallback gl_external_texture_frame_callback;
 } FlutterOpenGLRendererConfig;
@@ -243,37 +249,38 @@ typedef struct {
   // documentation on the Wiki at
   // https://github.com/flutter/flutter/wiki/Flutter-engine-operation-in-AOT-Mode
   const uint8_t* isolate_snapshot_instructions;
-  // The size of the isoalte snapshot instructions buffer.
+  // The size of the isolate snapshot instructions buffer.
   size_t isolate_snapshot_instructions_size;
 } FlutterProjectArgs;
 
 FLUTTER_EXPORT
-FlutterResult FlutterEngineRun(size_t version,
-                               const FlutterRendererConfig* config,
-                               const FlutterProjectArgs* args,
-                               void* user_data,
-                               FlutterEngine* engine_out);
+FlutterEngineResult FlutterEngineRun(size_t version,
+                                     const FlutterRendererConfig* config,
+                                     const FlutterProjectArgs* args,
+                                     void* user_data,
+                                     FlutterEngine* engine_out);
 
 FLUTTER_EXPORT
-FlutterResult FlutterEngineShutdown(FlutterEngine engine);
+FlutterEngineResult FlutterEngineShutdown(FlutterEngine engine);
 
 FLUTTER_EXPORT
-FlutterResult FlutterEngineSendWindowMetricsEvent(
+FlutterEngineResult FlutterEngineSendWindowMetricsEvent(
     FlutterEngine engine,
     const FlutterWindowMetricsEvent* event);
 
 FLUTTER_EXPORT
-FlutterResult FlutterEngineSendPointerEvent(FlutterEngine engine,
-                                            const FlutterPointerEvent* events,
-                                            size_t events_count);
+FlutterEngineResult FlutterEngineSendPointerEvent(
+    FlutterEngine engine,
+    const FlutterPointerEvent* events,
+    size_t events_count);
 
 FLUTTER_EXPORT
-FlutterResult FlutterEngineSendPlatformMessage(
+FlutterEngineResult FlutterEngineSendPlatformMessage(
     FlutterEngine engine,
     const FlutterPlatformMessage* message);
 
 FLUTTER_EXPORT
-FlutterResult FlutterEngineSendPlatformMessageResponse(
+FlutterEngineResult FlutterEngineSendPlatformMessageResponse(
     FlutterEngine engine,
     const FlutterPlatformMessageResponseHandle* handle,
     const uint8_t* data,
@@ -283,7 +290,7 @@ FlutterResult FlutterEngineSendPlatformMessageResponse(
 // message loop not controlled by the Flutter engine. This API will be
 // deprecated soon.
 FLUTTER_EXPORT
-FlutterResult __FlutterEngineFlushPendingTasksNow();
+FlutterEngineResult __FlutterEngineFlushPendingTasksNow();
 
 // Register an external texture with a unique (per engine) identifier. Only
 // rendering backends that support external textures accept external texture
@@ -291,18 +298,19 @@ FlutterResult __FlutterEngineFlushPendingTasksNow();
 // mark that a frame is available by calling
 // |FlutterEngineMarkExternalTextureFrameAvailable|.
 FLUTTER_EXPORT
-FlutterResult FlutterEngineRegisterExternalTexture(FlutterEngine engine,
-                                                   int64_t texture_identifier);
+FlutterEngineResult FlutterEngineRegisterExternalTexture(
+    FlutterEngine engine,
+    int64_t texture_identifier);
 
 // Unregister a previous texture registration.
 FLUTTER_EXPORT
-FlutterResult FlutterEngineUnregisterExternalTexture(
+FlutterEngineResult FlutterEngineUnregisterExternalTexture(
     FlutterEngine engine,
     int64_t texture_identifier);
 
 // Mark that a new texture frame is available for a given texture identifier.
 FLUTTER_EXPORT
-FlutterResult FlutterEngineMarkExternalTextureFrameAvailable(
+FlutterEngineResult FlutterEngineMarkExternalTextureFrameAvailable(
     FlutterEngine engine,
     int64_t texture_identifier);
 
