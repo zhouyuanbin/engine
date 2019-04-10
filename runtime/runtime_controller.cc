@@ -12,13 +12,13 @@
 #include "flutter/runtime/runtime_delegate.h"
 #include "third_party/tonic/dart_message_handler.h"
 
-namespace blink {
+namespace flutter {
 
 RuntimeController::RuntimeController(
     RuntimeDelegate& p_client,
     DartVM* p_vm,
-    fml::RefPtr<DartSnapshot> p_isolate_snapshot,
-    fml::RefPtr<DartSnapshot> p_shared_snapshot,
+    fml::RefPtr<const DartSnapshot> p_isolate_snapshot,
+    fml::RefPtr<const DartSnapshot> p_shared_snapshot,
     TaskRunners p_task_runners,
     fml::WeakPtr<SnapshotDelegate> p_snapshot_delegate,
     fml::WeakPtr<IOManager> p_io_manager,
@@ -40,8 +40,8 @@ RuntimeController::RuntimeController(
 RuntimeController::RuntimeController(
     RuntimeDelegate& p_client,
     DartVM* p_vm,
-    fml::RefPtr<DartSnapshot> p_isolate_snapshot,
-    fml::RefPtr<DartSnapshot> p_shared_snapshot,
+    fml::RefPtr<const DartSnapshot> p_isolate_snapshot,
+    fml::RefPtr<const DartSnapshot> p_shared_snapshot,
     TaskRunners p_task_runners,
     fml::WeakPtr<SnapshotDelegate> p_snapshot_delegate,
     fml::WeakPtr<IOManager> p_io_manager,
@@ -61,7 +61,7 @@ RuntimeController::RuntimeController(
       idle_notification_callback_(idle_notification_callback),
       window_data_(std::move(p_window_data)),
       root_isolate_(
-          DartIsolate::CreateRootIsolate(vm_,
+          DartIsolate::CreateRootIsolate(vm_->GetVMData()->GetSettings(),
                                          isolate_snapshot_,
                                          shared_snapshot_,
                                          task_runners_,
@@ -128,7 +128,8 @@ bool RuntimeController::FlushRuntimeStateToIsolate() {
          SetLocales(window_data_.locale_data) &&
          SetSemanticsEnabled(window_data_.semantics_enabled) &&
          SetAccessibilityFeatures(window_data_.accessibility_feature_flags_) &&
-         SetUserSettingsData(window_data_.user_settings_data);
+         SetUserSettingsData(window_data_.user_settings_data) &&
+         SetLifecycleState(window_data_.lifecycle_state);
 }
 
 bool RuntimeController::SetViewportMetrics(const ViewportMetrics& metrics) {
@@ -158,6 +159,17 @@ bool RuntimeController::SetUserSettingsData(const std::string& data) {
 
   if (auto* window = GetWindowIfAvailable()) {
     window->UpdateUserSettingsData(window_data_.user_settings_data);
+    return true;
+  }
+
+  return false;
+}
+
+bool RuntimeController::SetLifecycleState(const std::string& data) {
+  window_data_.lifecycle_state = data;
+
+  if (auto* window = GetWindowIfAvailable()) {
+    window->UpdateLifecycleState(window_data_.lifecycle_state);
     return true;
   }
 
@@ -332,4 +344,4 @@ RuntimeController::WindowData::WindowData(const WindowData& other) = default;
 
 RuntimeController::WindowData::~WindowData() = default;
 
-}  // namespace blink
+}  // namespace flutter

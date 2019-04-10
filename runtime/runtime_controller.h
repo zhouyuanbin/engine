@@ -20,7 +20,7 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 
-namespace blink {
+namespace flutter {
 class Scene;
 class RuntimeDelegate;
 class View;
@@ -30,8 +30,8 @@ class RuntimeController final : public WindowClient {
  public:
   RuntimeController(RuntimeDelegate& client,
                     DartVM* vm,
-                    fml::RefPtr<DartSnapshot> isolate_snapshot,
-                    fml::RefPtr<DartSnapshot> shared_snapshot,
+                    fml::RefPtr<const DartSnapshot> isolate_snapshot,
+                    fml::RefPtr<const DartSnapshot> shared_snapshot,
                     TaskRunners task_runners,
                     fml::WeakPtr<SnapshotDelegate> snapshot_delegate,
                     fml::WeakPtr<IOManager> io_manager,
@@ -48,6 +48,8 @@ class RuntimeController final : public WindowClient {
   bool SetLocales(const std::vector<std::string>& locale_data);
 
   bool SetUserSettingsData(const std::string& data);
+
+  bool SetLifecycleState(const std::string& data);
 
   bool SetSemanticsEnabled(bool enabled);
 
@@ -111,6 +113,7 @@ class RuntimeController final : public WindowClient {
     std::string variant_code;
     std::vector<std::string> locale_data;
     std::string user_settings_data = "{}";
+    std::string lifecycle_state;
     bool semantics_enabled = false;
     bool assistive_technology_enabled = false;
     int32_t accessibility_feature_flags_ = 0;
@@ -118,8 +121,8 @@ class RuntimeController final : public WindowClient {
 
   RuntimeDelegate& client_;
   DartVM* const vm_;
-  fml::RefPtr<DartSnapshot> isolate_snapshot_;
-  fml::RefPtr<DartSnapshot> shared_snapshot_;
+  fml::RefPtr<const DartSnapshot> isolate_snapshot_;
+  fml::RefPtr<const DartSnapshot> shared_snapshot_;
   TaskRunners task_runners_;
   fml::WeakPtr<SnapshotDelegate> snapshot_delegate_;
   fml::WeakPtr<IOManager> io_manager_;
@@ -132,8 +135,8 @@ class RuntimeController final : public WindowClient {
 
   RuntimeController(RuntimeDelegate& client,
                     DartVM* vm,
-                    fml::RefPtr<DartSnapshot> isolate_snapshot,
-                    fml::RefPtr<DartSnapshot> shared_snapshot,
+                    fml::RefPtr<const DartSnapshot> isolate_snapshot,
+                    fml::RefPtr<const DartSnapshot> shared_snapshot,
                     TaskRunners task_runners,
                     fml::WeakPtr<SnapshotDelegate> snapshot_delegate,
                     fml::WeakPtr<IOManager> io_manager,
@@ -146,31 +149,31 @@ class RuntimeController final : public WindowClient {
 
   bool FlushRuntimeStateToIsolate();
 
-  // |blink::WindowClient|
+  // |WindowClient|
   std::string DefaultRouteName() override;
 
-  // |blink::WindowClient|
+  // |WindowClient|
   void ScheduleFrame() override;
 
-  // |blink::WindowClient|
+  // |WindowClient|
   void Render(Scene* scene) override;
 
-  // |blink::WindowClient|
+  // |WindowClient|
   void UpdateSemantics(SemanticsUpdate* update) override;
 
-  // |blink::WindowClient|
+  // |WindowClient|
   void HandlePlatformMessage(fml::RefPtr<PlatformMessage> message) override;
 
-  // |blink::WindowClient|
+  // |WindowClient|
   FontCollection& GetFontCollection() override;
 
-  // |blink::WindowClient|
+  // |WindowClient|
   void UpdateIsolateDescription(const std::string isolate_name,
                                 int64_t isolate_port) override;
 
   FML_DISALLOW_COPY_AND_ASSIGN(RuntimeController);
 };
 
-}  // namespace blink
+}  // namespace flutter
 
 #endif  // FLUTTER_RUNTIME_RUNTIME_CONTROLLER_H_
