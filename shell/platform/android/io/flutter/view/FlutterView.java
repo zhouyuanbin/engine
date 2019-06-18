@@ -15,8 +15,11 @@ import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.os.Build;
 import android.os.Handler;
+import android.provider.Settings;
+import android.support.annotation.NonNull;
 import android.os.LocaleList;
 import android.support.annotation.RequiresApi;
+import android.support.annotation.UiThread;
 import android.text.format.DateFormat;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -188,15 +191,17 @@ public class FlutterView extends SurfaceView implements BinaryMessenger, Texture
         PlatformPlugin platformPlugin = new PlatformPlugin(activity, platformChannel);
         addActivityLifecycleListener(platformPlugin);
         mImm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-        mTextInputPlugin = new TextInputPlugin(this, dartExecutor);
+        PlatformViewsController platformViewsController = mNativeView.getPluginRegistry().getPlatformViewsController();
+        mTextInputPlugin = new TextInputPlugin(this, dartExecutor, platformViewsController);
         androidKeyProcessor = new AndroidKeyProcessor(keyEventChannel, mTextInputPlugin);
         androidTouchProcessor = new AndroidTouchProcessor(flutterRenderer);
+        mNativeView.getPluginRegistry().getPlatformViewsController().attachTextInputPlugin(mTextInputPlugin);
 
         // Send initial platform information to Dart
         sendLocalesToDart(getResources().getConfiguration());
         sendUserPlatformSettingsToDart();
     }
-    
+
     private static Activity getActivity(Context context) {
         if (context == null) {
             return null;
@@ -209,6 +214,11 @@ public class FlutterView extends SurfaceView implements BinaryMessenger, Texture
             return getActivity(((ContextWrapper) context).getBaseContext());
         }
         return null;
+    }
+
+    @NonNull
+    public DartExecutor getDartExecutor() {
+        return dartExecutor;
     }
 
     @Override
@@ -385,6 +395,12 @@ public class FlutterView extends SurfaceView implements BinaryMessenger, Texture
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         return mTextInputPlugin.createInputConnection(this, outAttrs);
+    }
+
+    @Override
+    public boolean checkInputConnectionProxy(View view) {
+        PlatformViewsController platformViewsController = mNativeView.getPluginRegistry().getPlatformViewsController();
+        return platformViewsController.isPlatformView(view);
     }
 
     @Override
@@ -725,11 +741,13 @@ public class FlutterView extends SurfaceView implements BinaryMessenger, Texture
     }
 
     @Override
+    @UiThread
     public void send(String channel, ByteBuffer message) {
         send(channel, message, null);
     }
 
     @Override
+    @UiThread
     public void send(String channel, ByteBuffer message, BinaryReply callback) {
         if (!isAttached()) {
             Log.d(TAG, "FlutterView.send called on a detached view, channel=" + channel);
@@ -739,6 +757,7 @@ public class FlutterView extends SurfaceView implements BinaryMessenger, Texture
     }
 
     @Override
+    @UiThread
     public void setMessageHandler(String channel, BinaryMessageHandler handler) {
         mNativeView.setMessageHandler(channel, handler);
     }

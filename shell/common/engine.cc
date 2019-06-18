@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "flutter/common/settings.h"
-#include "flutter/common/version/version.h"
 #include "flutter/fml/eintr_wrapper.h"
 #include "flutter/fml/file.h"
 #include "flutter/fml/make_copyable.h"
@@ -34,6 +33,7 @@ static constexpr char kLifecycleChannel[] = "flutter/lifecycle";
 static constexpr char kNavigationChannel[] = "flutter/navigation";
 static constexpr char kLocalizationChannel[] = "flutter/localization";
 static constexpr char kSettingsChannel[] = "flutter/settings";
+static constexpr char kIsolateChannel[] = "flutter/isolate";
 
 Engine::Engine(Delegate& delegate,
                DartVM& vm,
@@ -63,7 +63,9 @@ Engine::Engine(Delegate& delegate,
       std::move(io_manager),                 // io manager
       settings_.advisory_script_uri,         // advisory script uri
       settings_.advisory_script_entrypoint,  // advisory script entrypoint
-      settings_.idle_notification_callback   // idle notification callback
+      settings_.idle_notification_callback,  // idle notification callback
+      settings_.isolate_create_callback,     // isolate create callback
+      settings_.isolate_shutdown_callback    // isolate shutdown callback
   );
 }
 
@@ -144,6 +146,14 @@ Engine::RunStatus Engine::Run(RunConfiguration configuration) {
       isolate->AddIsolateShutdownCallback(
           settings_.root_isolate_shutdown_callback);
     }
+
+    std::string service_id = isolate->GetServiceId();
+    fml::RefPtr<PlatformMessage> service_id_message =
+        fml::MakeRefCounted<flutter::PlatformMessage>(
+            kIsolateChannel,
+            std::vector<uint8_t>(service_id.begin(), service_id.end()),
+            nullptr);
+    HandlePlatformMessage(service_id_message);
   }
 
   return isolate_running ? Engine::RunStatus::Success
@@ -178,13 +188,15 @@ Engine::RunStatus Engine::PrepareAndLaunchIsolate(
   }
 
   if (configuration.GetEntrypointLibrary().empty()) {
-    if (!isolate->Run(configuration.GetEntrypoint())) {
+    if (!isolate->Run(configuration.GetEntrypoint(),
+                      settings_.dart_entrypoint_args)) {
       FML_LOG(ERROR) << "Could not run the isolate.";
       return RunStatus::Failure;
     }
   } else {
     if (!isolate->RunFromLibrary(configuration.GetEntrypointLibrary(),
-                                 configuration.GetEntrypoint())) {
+                                 configuration.GetEntrypoint(),
+                                 settings_.dart_entrypoint_args)) {
       FML_LOG(ERROR) << "Could not run the isolate.";
       return RunStatus::Failure;
     }
@@ -196,6 +208,11 @@ Engine::RunStatus Engine::PrepareAndLaunchIsolate(
 void Engine::BeginFrame(fml::TimePoint frame_time) {
   TRACE_EVENT0("flutter", "Engine::BeginFrame");
   runtime_controller_->BeginFrame(frame_time);
+}
+
+void Engine::ReportTimings(std::vector<int64_t> timings) {
+  TRACE_EVENT0("flutter", "Engine::ReportTimings");
+  runtime_controller_->ReportTimings(std::move(timings));
 }
 
 void Engine::NotifyIdle(int64_t deadline) {
@@ -238,7 +255,8 @@ void Engine::OnOutputSurfaceDestroyed() {
 void Engine::SetViewportMetrics(const ViewportMetrics& metrics) {
   bool dimensions_changed =
       viewport_metrics_.physical_height != metrics.physical_height ||
-      viewport_metrics_.physical_width != metrics.physical_width;
+      viewport_metrics_.physical_width != metrics.physical_width ||
+      viewport_metrics_.physical_depth != metrics.physical_depth;
   viewport_metrics_ = metrics;
   runtime_controller_->SetViewportMetrics(viewport_metrics_);
   if (animator_) {
@@ -397,7 +415,7 @@ void Engine::ScheduleFrame(bool regenerate_layer_tree) {
   animator_->RequestFrame(regenerate_layer_tree);
 }
 
-void Engine::Render(std::unique_ptr<flow::LayerTree> layer_tree) {
+void Engine::Render(std::unique_ptr<flutter::LayerTree> layer_tree) {
   if (!layer_tree)
     return;
 
@@ -426,6 +444,10 @@ void Engine::HandlePlatformMessage(fml::RefPtr<PlatformMessage> message) {
 void Engine::UpdateIsolateDescription(const std::string isolate_name,
                                       int64_t isolate_port) {
   delegate_.UpdateIsolateDescription(isolate_name, isolate_port);
+}
+
+void Engine::SetNeedsReportTimings(bool value) {
+  delegate_.SetNeedsReportTimings(value);
 }
 
 FontCollection& Engine::GetFontCollection() {

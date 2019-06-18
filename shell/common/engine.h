@@ -29,6 +29,9 @@
 
 namespace flutter {
 
+/// Manager of the root Dart isolate and the relay of platform messages.
+///
+/// Also setups up dart::ui bindings and handles restarts.
 class Engine final : public RuntimeDelegate {
  public:
   // Used by Engine::Run
@@ -52,6 +55,8 @@ class Engine final : public RuntimeDelegate {
 
     virtual void UpdateIsolateDescription(const std::string isolate_name,
                                           int64_t isolate_port) = 0;
+
+    virtual void SetNeedsReportTimings(bool value) = 0;
   };
 
   Engine(Delegate& delegate,
@@ -83,6 +88,8 @@ class Engine final : public RuntimeDelegate {
   bool UpdateAssetManager(std::shared_ptr<AssetManager> asset_manager);
 
   void BeginFrame(fml::TimePoint frame_time);
+
+  void ReportTimings(std::vector<int64_t> timings);
 
   void NotifyIdle(int64_t deadline);
 
@@ -137,7 +144,7 @@ class Engine final : public RuntimeDelegate {
   std::string DefaultRouteName() override;
 
   // |RuntimeDelegate|
-  void Render(std::unique_ptr<flow::LayerTree> layer_tree) override;
+  void Render(std::unique_ptr<flutter::LayerTree> layer_tree) override;
 
   // |RuntimeDelegate|
   void UpdateSemantics(SemanticsNodeUpdates update,
@@ -149,6 +156,8 @@ class Engine final : public RuntimeDelegate {
   // |RuntimeDelegate|
   void UpdateIsolateDescription(const std::string isolate_name,
                                 int64_t isolate_port) override;
+
+  void SetNeedsReportTimings(bool value) override;
 
   void StopAnimator();
 
@@ -167,6 +176,8 @@ class Engine final : public RuntimeDelegate {
   bool GetAssetAsBuffer(const std::string& name, std::vector<uint8_t>* data);
 
   RunStatus PrepareAndLaunchIsolate(RunConfiguration configuration);
+
+  friend class testing::ShellTest;
 
   FML_DISALLOW_COPY_AND_ASSIGN(Engine);
 };

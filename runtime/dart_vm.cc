@@ -10,11 +10,11 @@
 #include <vector>
 
 #include "flutter/common/settings.h"
-#include "flutter/fml/arraysize.h"
 #include "flutter/fml/compiler_specific.h"
 #include "flutter/fml/file.h"
 #include "flutter/fml/logging.h"
 #include "flutter/fml/mapping.h"
+#include "flutter/fml/size.h"
 #include "flutter/fml/synchronization/count_down_latch.h"
 #include "flutter/fml/synchronization/thread_annotations.h"
 #include "flutter/fml/time/time_delta.h"
@@ -32,7 +32,7 @@
 #include "third_party/tonic/file_loader/file_loader.h"
 #include "third_party/tonic/logging/dart_error.h"
 #include "third_party/tonic/scopes/dart_api_scope.h"
-#include "third_party/tonic/typed_data/uint8_list.h"
+#include "third_party/tonic/typed_data/typed_list.h"
 
 namespace dart {
 namespace observatory {
@@ -82,6 +82,10 @@ static const char* kDartAssertArgs[] = {
 
 static const char* kDartStartPausedArgs[]{
     "--pause_isolates_on_start",
+};
+
+static const char* kDartDisableServiceAuthCodesArgs[]{
+    "--disable-service-auth-codes",
 };
 
 static const char* kDartTraceStartupArgs[]{
@@ -288,11 +292,11 @@ DartVM::DartVM(std::shared_ptr<const DartVMData> vm_data,
     args.push_back(profiler_flag);
   }
 
-  PushBackAll(&args, kDartLanguageArgs, arraysize(kDartLanguageArgs));
+  PushBackAll(&args, kDartLanguageArgs, fml::size(kDartLanguageArgs));
 
   if (IsRunningPrecompiledCode()) {
     PushBackAll(&args, kDartPrecompilationArgs,
-                arraysize(kDartPrecompilationArgs));
+                fml::size(kDartPrecompilationArgs));
   }
 
   // Enable Dart assertions if we are not running precompiled code. We run non-
@@ -314,37 +318,42 @@ DartVM::DartVM(std::shared_ptr<const DartVMData> vm_data,
   // Debug mode uses the JIT, disable code page write protection to avoid
   // memory page protection changes before and after every compilation.
   PushBackAll(&args, kDartWriteProtectCodeArgs,
-              arraysize(kDartWriteProtectCodeArgs));
+              fml::size(kDartWriteProtectCodeArgs));
 #endif
 
   if (enable_asserts) {
-    PushBackAll(&args, kDartAssertArgs, arraysize(kDartAssertArgs));
+    PushBackAll(&args, kDartAssertArgs, fml::size(kDartAssertArgs));
   }
 
   if (settings_.start_paused) {
-    PushBackAll(&args, kDartStartPausedArgs, arraysize(kDartStartPausedArgs));
+    PushBackAll(&args, kDartStartPausedArgs, fml::size(kDartStartPausedArgs));
+  }
+
+  if (settings_.disable_service_auth_codes) {
+    PushBackAll(&args, kDartDisableServiceAuthCodesArgs,
+                fml::size(kDartDisableServiceAuthCodesArgs));
   }
 
   if (settings_.endless_trace_buffer || settings_.trace_startup) {
     // If we are tracing startup, make sure the trace buffer is endless so we
     // don't lose early traces.
     PushBackAll(&args, kDartEndlessTraceBufferArgs,
-                arraysize(kDartEndlessTraceBufferArgs));
+                fml::size(kDartEndlessTraceBufferArgs));
   }
 
   if (settings_.trace_systrace) {
     PushBackAll(&args, kDartSystraceTraceBufferArgs,
-                arraysize(kDartSystraceTraceBufferArgs));
-    PushBackAll(&args, kDartTraceStreamsArgs, arraysize(kDartTraceStreamsArgs));
+                fml::size(kDartSystraceTraceBufferArgs));
+    PushBackAll(&args, kDartTraceStreamsArgs, fml::size(kDartTraceStreamsArgs));
   }
 
   if (settings_.trace_startup) {
-    PushBackAll(&args, kDartTraceStartupArgs, arraysize(kDartTraceStartupArgs));
+    PushBackAll(&args, kDartTraceStartupArgs, fml::size(kDartTraceStartupArgs));
   }
 
 #if defined(OS_FUCHSIA)
-  PushBackAll(&args, kDartFuchsiaTraceArgs, arraysize(kDartFuchsiaTraceArgs));
-  PushBackAll(&args, kDartTraceStreamsArgs, arraysize(kDartTraceStreamsArgs));
+  PushBackAll(&args, kDartFuchsiaTraceArgs, fml::size(kDartFuchsiaTraceArgs));
+  PushBackAll(&args, kDartTraceStreamsArgs, fml::size(kDartTraceStreamsArgs));
 #endif
 
   for (size_t i = 0; i < settings_.dart_flags.size(); i++)
@@ -362,10 +371,9 @@ DartVM::DartVM(std::shared_ptr<const DartVMData> vm_data,
     TRACE_EVENT0("flutter", "Dart_Initialize");
     Dart_InitializeParams params = {};
     params.version = DART_INITIALIZE_PARAMS_CURRENT_VERSION;
-    params.vm_snapshot_data =
-        vm_data_->GetVMSnapshot().GetData()->GetSnapshotPointer();
+    params.vm_snapshot_data = vm_data_->GetVMSnapshot().GetDataMapping();
     params.vm_snapshot_instructions =
-        vm_data_->GetVMSnapshot().GetInstructionsIfPresent();
+        vm_data_->GetVMSnapshot().GetInstructionsMapping();
     params.create = reinterpret_cast<decltype(params.create)>(
         DartIsolate::DartIsolateCreateCallback);
     params.shutdown = reinterpret_cast<decltype(params.shutdown)>(
@@ -374,7 +382,7 @@ DartVM::DartVM(std::shared_ptr<const DartVMData> vm_data,
         DartIsolate::DartIsolateCleanupCallback);
     params.thread_exit = ThreadExitCallback;
     params.get_service_assets = GetVMServiceAssetsArchiveCallback;
-    params.entropy_source = DartIO::EntropySource;
+    params.entropy_source = dart::bin::GetEntropy;
     char* init_error = Dart_Initialize(&params);
     if (init_error) {
       FML_LOG(FATAL) << "Error while initializing the Dart VM: " << init_error;
@@ -449,56 +457,6 @@ std::shared_ptr<ServiceProtocol> DartVM::GetServiceProtocol() const {
 
 std::shared_ptr<IsolateNameServer> DartVM::GetIsolateNameServer() const {
   return isolate_name_server_;
-}
-
-size_t DartVM::GetIsolateCount() const {
-  std::lock_guard<std::mutex> lock(active_isolates_mutex_);
-  return active_isolates_.size();
-}
-
-void DartVM::ShutdownAllIsolates() {
-  std::set<std::shared_ptr<DartIsolate>> isolates_to_shutdown;
-  // We may be shutting down isolates on the current thread. Shutting down the
-  // isolate calls the shutdown callback which removes the entry from the
-  // active isolate. The lock must be obtained to mutate that entry. To avoid a
-  // deadlock, collect the isolate is a seprate collection.
-  {
-    std::lock_guard<std::mutex> lock(active_isolates_mutex_);
-    for (const auto& active_isolate : active_isolates_) {
-      if (auto task_runner = active_isolate->GetMessageHandlingTaskRunner()) {
-        isolates_to_shutdown.insert(active_isolate);
-      }
-    }
-  }
-
-  fml::CountDownLatch latch(isolates_to_shutdown.size());
-
-  for (const auto& isolate : isolates_to_shutdown) {
-    fml::TaskRunner::RunNowOrPostTask(
-        isolate->GetMessageHandlingTaskRunner(), [&latch, isolate]() {
-          if (!isolate || !isolate->Shutdown()) {
-            FML_LOG(ERROR) << "Could not shutdown isolate.";
-          }
-          latch.CountDown();
-        });
-  }
-  latch.Wait();
-}
-
-void DartVM::RegisterActiveIsolate(std::shared_ptr<DartIsolate> isolate) {
-  if (!isolate) {
-    return;
-  }
-  std::lock_guard<std::mutex> lock(active_isolates_mutex_);
-  active_isolates_.insert(isolate);
-}
-
-void DartVM::UnregisterActiveIsolate(std::shared_ptr<DartIsolate> isolate) {
-  if (!isolate) {
-    return;
-  }
-  std::lock_guard<std::mutex> lock(active_isolates_mutex_);
-  active_isolates_.erase(isolate);
 }
 
 }  // namespace flutter

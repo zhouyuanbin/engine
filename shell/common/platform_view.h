@@ -25,6 +25,8 @@ namespace flutter {
 
 class Shell;
 
+/// Abstract Base Class that represents the platform specific view we will be
+/// rendering to.
 class PlatformView {
  public:
   class Delegate {
@@ -54,7 +56,7 @@ class PlatformView {
     virtual void OnPlatformViewSetAccessibilityFeatures(int32_t flags) = 0;
 
     virtual void OnPlatformViewRegisterTexture(
-        std::shared_ptr<flow::Texture> texture) = 0;
+        std::shared_ptr<flutter::Texture> texture) = 0;
 
     virtual void OnPlatformViewUnregisterTexture(int64_t texture_id) = 0;
 
@@ -106,7 +108,7 @@ class PlatformView {
   void DispatchPointerDataPacket(std::unique_ptr<PointerDataPacket> packet);
 
   // Called once per texture, on the platform thread.
-  void RegisterTexture(std::shared_ptr<flow::Texture> texture);
+  void RegisterTexture(std::shared_ptr<flutter::Texture> texture);
 
   // Called once per texture, on the platform thread.
   void UnregisterTexture(int64_t texture_id);

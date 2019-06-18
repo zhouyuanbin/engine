@@ -34,9 +34,12 @@
 
 namespace flutter {
 
+/// Wraps up all the different components of Flutter engine and coordinates them
+/// through a series of delegates.
 class Shell final : public PlatformView::Delegate,
                     public Animator::Delegate,
                     public Engine::Delegate,
+                    public Rasterizer::Delegate,
                     public ServiceProtocol::Handler {
  public:
   template <class T>
@@ -93,6 +96,8 @@ class Shell final : public PlatformView::Delegate,
   std::unique_ptr<Rasterizer> rasterizer_;       // on GPU task runner
   std::unique_ptr<ShellIOManager> io_manager_;   // on IO task runner
 
+  fml::WeakPtr<Engine> weak_engine_;  // to be shared across threads
+
   std::unordered_map<std::string,  // method
                      std::pair<fml::RefPtr<fml::TaskRunner>,
                                ServiceProtocolHandler>  // task-runner/function
@@ -101,6 +106,22 @@ class Shell final : public PlatformView::Delegate,
       service_protocol_handlers_;
   bool is_setup_ = false;
   uint64_t next_pointer_flow_id_ = 0;
+
+  // Written in the UI thread and read from the GPU thread. Hence make it
+  // atomic.
+  std::atomic<bool> needs_report_timings_{false};
+
+  // Whether there's a task scheduled to report the timings to Dart through
+  // ui.Window.onReportTimings.
+  bool frame_timings_report_scheduled_ = false;
+
+  // Vector of FrameTiming::kCount * n timestamps for n frames whose timings
+  // have not been reported yet. Vector of ints instead of FrameTiming is stored
+  // here for easier conversions to Dart objects.
+  std::vector<int64_t> unreported_timings_;
+
+  // How many frames have been timed since last report.
+  size_t UnreportedFramesCount() const;
 
   Shell(TaskRunners task_runners, Settings settings);
   Shell(DartVMRef vm, TaskRunners task_runners, Settings settings);
@@ -118,6 +139,8 @@ class Shell final : public PlatformView::Delegate,
              std::unique_ptr<Engine> engine,
              std::unique_ptr<Rasterizer> rasterizer,
              std::unique_ptr<ShellIOManager> io_manager);
+
+  void ReportTimings();
 
   // |PlatformView::Delegate|
   void OnPlatformViewCreated(std::unique_ptr<Surface> surface) override;
@@ -151,7 +174,7 @@ class Shell final : public PlatformView::Delegate,
 
   // |PlatformView::Delegate|
   void OnPlatformViewRegisterTexture(
-      std::shared_ptr<flow::Texture> texture) override;
+      std::shared_ptr<flutter::Texture> texture) override;
 
   // |PlatformView::Delegate|
   void OnPlatformViewUnregisterTexture(int64_t texture_id) override;
@@ -169,7 +192,8 @@ class Shell final : public PlatformView::Delegate,
   void OnAnimatorNotifyIdle(int64_t deadline) override;
 
   // |Animator::Delegate|
-  void OnAnimatorDraw(fml::RefPtr<Pipeline<flow::LayerTree>> pipeline) override;
+  void OnAnimatorDraw(
+      fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline) override;
 
   // |Animator::Delegate|
   void OnAnimatorDrawLastLayerTree() override;
@@ -191,6 +215,12 @@ class Shell final : public PlatformView::Delegate,
   // |Engine::Delegate|
   void UpdateIsolateDescription(const std::string isolate_name,
                                 int64_t isolate_port) override;
+
+  // |Engine::Delegate|
+  void SetNeedsReportTimings(bool value) override;
+
+  // |Rasterizer::Delegate|
+  void OnFrameRasterized(const FrameTiming&) override;
 
   // |ServiceProtocol::Handler|
   fml::RefPtr<fml::TaskRunner> GetServiceProtocolHandlerTaskRunner(
@@ -235,6 +265,10 @@ class Shell final : public PlatformView::Delegate,
   bool OnServiceProtocolGetDisplayRefreshRate(
       const ServiceProtocol::Handler::ServiceProtocolMap& params,
       rapidjson::Document& response);
+
+  fml::WeakPtrFactory<Shell> weak_factory_;
+
+  friend class testing::ShellTest;
 
   FML_DISALLOW_COPY_AND_ASSIGN(Shell);
 };

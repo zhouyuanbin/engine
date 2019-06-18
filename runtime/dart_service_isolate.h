@@ -26,9 +26,8 @@ class DartServiceIsolate {
                       intptr_t server_port,
                       Dart_LibraryTagHandler embedder_tag_handler,
                       bool disable_origin_check,
+                      bool disable_service_auth_codes,
                       char** error);
-
-  static std::string GetObservatoryUri();
 
   using CallbackHandle = ptrdiff_t;
 

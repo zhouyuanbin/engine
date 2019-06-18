@@ -11,11 +11,11 @@
 #include "flutter/assets/directory_asset_bundle.h"
 #include "flutter/assets/zip_asset_store.h"
 #include "flutter/common/settings.h"
-#include "flutter/fml/arraysize.h"
 #include "flutter/fml/file.h"
 #include "flutter/fml/platform/android/jni_util.h"
 #include "flutter/fml/platform/android/jni_weak_ref.h"
 #include "flutter/fml/platform/android/scoped_java_ref.h"
+#include "flutter/fml/size.h"
 #include "flutter/lib/ui/plugins/callback_cache.h"
 #include "flutter/runtime/dart_service_isolate.h"
 #include "flutter/shell/common/run_configuration.h"
@@ -162,11 +162,6 @@ static jlong AttachJNI(JNIEnv* env,
 
 static void DestroyJNI(JNIEnv* env, jobject jcaller, jlong shell_holder) {
   delete ANDROID_SHELL_HOLDER;
-}
-
-static jstring GetObservatoryUri(JNIEnv* env, jclass clazz) {
-  return env->NewStringUTF(
-      flutter::DartServiceIsolate::GetObservatoryUri().c_str());
 }
 
 static void SurfaceCreated(JNIEnv* env,
@@ -554,11 +549,6 @@ bool RegisterApi(JNIEnv* env) {
           .fnPtr = reinterpret_cast<void*>(&RunBundleAndSnapshotFromLibrary),
       },
       {
-          .name = "nativeGetObservatoryUri",
-          .signature = "()Ljava/lang/String;",
-          .fnPtr = reinterpret_cast<void*>(&GetObservatoryUri),
-      },
-      {
           .name = "nativeDispatchEmptyPlatformMessage",
           .signature = "(JLjava/lang/String;I)V",
           .fnPtr = reinterpret_cast<void*>(&DispatchEmptyPlatformMessage),
@@ -650,7 +640,7 @@ bool RegisterApi(JNIEnv* env) {
   };
 
   if (env->RegisterNatives(g_flutter_jni_class->obj(), flutter_jni_methods,
-                           arraysize(flutter_jni_methods)) != 0) {
+                           fml::size(flutter_jni_methods)) != 0) {
     FML_LOG(ERROR) << "Failed to RegisterNatives with FlutterJNI";
     return false;
   }
@@ -755,7 +745,7 @@ bool PlatformViewAndroid::Register(JNIEnv* env) {
 
   if (env->RegisterNatives(g_flutter_callback_info_class->obj(),
                            callback_info_methods,
-                           arraysize(callback_info_methods)) != 0) {
+                           fml::size(callback_info_methods)) != 0) {
     FML_LOG(ERROR) << "Failed to RegisterNatives with FlutterCallbackInfo";
     return false;
   }

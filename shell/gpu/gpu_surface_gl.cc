@@ -4,8 +4,8 @@
 
 #include "gpu_surface_gl.h"
 
-#include "flutter/fml/arraysize.h"
 #include "flutter/fml/logging.h"
+#include "flutter/fml/size.h"
 #include "flutter/fml/trace_event.h"
 #include "flutter/shell/common/persistent_cache.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -320,7 +320,7 @@ GrContext* GPUSurfaceGL::GetContext() {
 }
 
 // |Surface|
-flow::ExternalViewEmbedder* GPUSurfaceGL::GetExternalViewEmbedder() {
+flutter::ExternalViewEmbedder* GPUSurfaceGL::GetExternalViewEmbedder() {
   return delegate_->GetExternalViewEmbedder();
 }
 

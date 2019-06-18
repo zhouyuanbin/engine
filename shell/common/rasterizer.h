@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "flutter/common/settings.h"
 #include "flutter/common/task_runners.h"
 #include "flutter/flow/compositor_context.h"
 #include "flutter/flow/layers/layer_tree.h"
@@ -19,12 +20,25 @@
 
 namespace flutter {
 
+/// Takes |LayerTree|s and draws its contents.
 class Rasterizer final : public SnapshotDelegate {
  public:
-  Rasterizer(TaskRunners task_runners);
-
+  class Delegate {
+   public:
+    virtual void OnFrameRasterized(const FrameTiming&) = 0;
+  };
+  // TODO(dnfield): remove once embedders have caught up.
+  class DummyDelegate : public Delegate {
+    void OnFrameRasterized(const FrameTiming&) override {}
+  };
   Rasterizer(TaskRunners task_runners,
-             std::unique_ptr<flow::CompositorContext> compositor_context);
+             std::unique_ptr<flutter::CompositorContext> compositor_context);
+
+  Rasterizer(Delegate& delegate, TaskRunners task_runners);
+
+  Rasterizer(Delegate& delegate,
+             TaskRunners task_runners,
+             std::unique_ptr<flutter::CompositorContext> compositor_context);
 
   ~Rasterizer();
 
@@ -36,13 +50,13 @@ class Rasterizer final : public SnapshotDelegate {
 
   fml::WeakPtr<SnapshotDelegate> GetSnapshotDelegate() const;
 
-  flow::LayerTree* GetLastLayerTree();
+  flutter::LayerTree* GetLastLayerTree();
 
   void DrawLastLayerTree();
 
-  flow::TextureRegistry* GetTextureRegistry();
+  flutter::TextureRegistry* GetTextureRegistry();
 
-  void Draw(fml::RefPtr<Pipeline<flow::LayerTree>> pipeline);
+  void Draw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline);
 
   enum class ScreenshotType {
     SkiaPicture,
@@ -69,17 +83,18 @@ class Rasterizer final : public SnapshotDelegate {
   // the surface on the GPU task runner.
   void SetNextFrameCallback(fml::closure callback);
 
-  flow::CompositorContext* compositor_context() {
+  flutter::CompositorContext* compositor_context() {
     return compositor_context_.get();
   }
 
   void SetResourceCacheMaxBytes(int max_bytes);
 
  private:
+  Delegate& delegate_;
   TaskRunners task_runners_;
   std::unique_ptr<Surface> surface_;
-  std::unique_ptr<flow::CompositorContext> compositor_context_;
-  std::unique_ptr<flow::LayerTree> last_layer_tree_;
+  std::unique_ptr<flutter::CompositorContext> compositor_context_;
+  std::unique_ptr<flutter::LayerTree> last_layer_tree_;
   fml::closure next_frame_callback_;
   fml::WeakPtrFactory<Rasterizer> weak_factory_;
 
@@ -87,9 +102,9 @@ class Rasterizer final : public SnapshotDelegate {
   sk_sp<SkImage> MakeRasterSnapshot(sk_sp<SkPicture> picture,
                                     SkISize picture_size) override;
 
-  void DoDraw(std::unique_ptr<flow::LayerTree> layer_tree);
+  void DoDraw(std::unique_ptr<flutter::LayerTree> layer_tree);
 
-  bool DrawToSurface(flow::LayerTree& layer_tree);
+  bool DrawToSurface(flutter::LayerTree& layer_tree);
 
   void FireNextFrameCallbackIfPresent();
 
