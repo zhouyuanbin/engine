@@ -22,6 +22,7 @@
 #include "flutter/shell/common/switches.h"
 #include "flutter/shell/common/thread_host.h"
 #include "flutter/testing/testing.h"
+#include "third_party/tonic/converter/dart_converter.h"
 
 namespace flutter {
 namespace testing {
@@ -156,7 +157,7 @@ TEST_F(ShellTest, InitializeWithGPUAndPlatformThreadsTheSame) {
 TEST_F(ShellTest, FixturesAreFunctional) {
   ASSERT_FALSE(DartVMRef::IsInstanceRunning());
   auto settings = CreateSettingsForFixture();
-  auto shell = CreateShell(std::move(settings));
+  auto shell = CreateShell(settings);
   ASSERT_TRUE(ValidateShell(shell.get()));
 
   auto configuration = RunConfiguration::InferFromSettings(settings);
@@ -178,7 +179,7 @@ TEST_F(ShellTest, FixturesAreFunctional) {
 TEST_F(ShellTest, SecondaryIsolateBindingsAreSetupViaShellSettings) {
   ASSERT_FALSE(DartVMRef::IsInstanceRunning());
   auto settings = CreateSettingsForFixture();
-  auto shell = CreateShell(std::move(settings));
+  auto shell = CreateShell(settings);
   ASSERT_TRUE(ValidateShell(shell.get()));
 
   auto configuration = RunConfiguration::InferFromSettings(settings);
@@ -222,8 +223,7 @@ TEST_F(ShellTest, BlacklistedDartVMFlag) {
       fml::CommandLine::Option("dart-flags", "--verify_after_gc")};
   fml::CommandLine command_line("", options, std::vector<std::string>());
 
-#if FLUTTER_RUNTIME_MODE != FLUTTER_RUNTIME_MODE_RELEASE && \
-    FLUTTER_RUNTIME_MODE != FLUTTER_RUNTIME_MODE_DYNAMIC_RELEASE
+#if FLUTTER_RUNTIME_MODE != FLUTTER_RUNTIME_MODE_RELEASE
   // Upon encountering a non-whitelisted Dart flag the process terminates.
   const char* expected =
       "Encountered blacklisted Dart VM flag: --verify_after_gc";
@@ -241,8 +241,7 @@ TEST_F(ShellTest, WhitelistedDartVMFlag) {
   fml::CommandLine command_line("", options, std::vector<std::string>());
   flutter::Settings settings = flutter::SettingsFromCommandLine(command_line);
 
-#if FLUTTER_RUNTIME_MODE != FLUTTER_RUNTIME_MODE_RELEASE && \
-    FLUTTER_RUNTIME_MODE != FLUTTER_RUNTIME_MODE_DYNAMIC_RELEASE
+#if FLUTTER_RUNTIME_MODE != FLUTTER_RUNTIME_MODE_RELEASE
   EXPECT_EQ(settings.dart_flags.size(), 2u);
   EXPECT_EQ(settings.dart_flags[0], "--max_profile_depth 1");
   EXPECT_EQ(settings.dart_flags[1], "--random_seed 42");
@@ -253,7 +252,7 @@ TEST_F(ShellTest, WhitelistedDartVMFlag) {
 
 TEST_F(ShellTest, NoNeedToReportTimingsByDefault) {
   auto settings = CreateSettingsForFixture();
-  std::unique_ptr<Shell> shell = CreateShell(std::move(settings));
+  std::unique_ptr<Shell> shell = CreateShell(settings);
 
   // Create the surface needed by rasterizer
   PlatformViewNotifyCreated(shell.get());
@@ -266,11 +265,11 @@ TEST_F(ShellTest, NoNeedToReportTimingsByDefault) {
   ASSERT_FALSE(GetNeedsReportTimings(shell.get()));
 
   // This assertion may or may not be the direct result of needs_report_timings_
-  // being false. The count could be 0 simply because we just cleared unreported
-  // timings by reporting them. Hence this can't replace the
-  // ASSERT_FALSE(GetNeedsReportTimings(shell.get())) check. We added this
-  // assertion for an additional confidence that we're not pushing back to
-  // unreported timings unnecessarily.
+  // being false. The count could be 0 simply because we just cleared
+  // unreported timings by reporting them. Hence this can't replace the
+  // ASSERT_FALSE(GetNeedsReportTimings(shell.get())) check. We added
+  // this assertion for an additional confidence that we're not pushing
+  // back to unreported timings unnecessarily.
   //
   // Conversely, do not assert UnreportedTimingsCount(shell.get()) to be
   // positive in any tests. Otherwise those tests will be flaky as the clearing
@@ -280,7 +279,7 @@ TEST_F(ShellTest, NoNeedToReportTimingsByDefault) {
 
 TEST_F(ShellTest, NeedsReportTimingsIsSetWithCallback) {
   auto settings = CreateSettingsForFixture();
-  std::unique_ptr<Shell> shell = CreateShell(std::move(settings));
+  std::unique_ptr<Shell> shell = CreateShell(settings);
 
   // Create the surface needed by rasterizer
   PlatformViewNotifyCreated(shell.get());
@@ -317,7 +316,7 @@ static void CheckFrameTimings(const std::vector<FrameTiming>& timings,
 TEST_F(ShellTest, ReportTimingsIsCalled) {
   fml::TimePoint start = fml::TimePoint::Now();
   auto settings = CreateSettingsForFixture();
-  std::unique_ptr<Shell> shell = CreateShell(std::move(settings));
+  std::unique_ptr<Shell> shell = CreateShell(settings);
 
   // Create the surface needed by rasterizer
   PlatformViewNotifyCreated(shell.get());
@@ -383,7 +382,7 @@ TEST_F(ShellTest, FrameRasterizedCallbackIsCalled) {
     timingLatch.Signal();
   };
 
-  std::unique_ptr<Shell> shell = CreateShell(std::move(settings));
+  std::unique_ptr<Shell> shell = CreateShell(settings);
 
   // Create the surface needed by rasterizer
   PlatformViewNotifyCreated(shell.get());
@@ -435,13 +434,59 @@ TEST(SettingsTest, FrameTimingSetsAndGetsProperly) {
 }
 
 #if FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_RELEASE
-TEST_F(ShellTest, ReportTimingsIsCalledSoonerInNonReleaseMode) {
+TEST_F(ShellTest, ReportTimingsIsCalledLaterInReleaseMode) {
 #else
-TEST_F(ShellTest, ReportTimingsIsCalledLaterInNonReleaseMode) {
+TEST_F(ShellTest, ReportTimingsIsCalledSoonerInNonReleaseMode) {
 #endif
   fml::TimePoint start = fml::TimePoint::Now();
   auto settings = CreateSettingsForFixture();
-  std::unique_ptr<Shell> shell = CreateShell(std::move(settings));
+  std::unique_ptr<Shell> shell = CreateShell(settings);
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  ASSERT_TRUE(configuration.IsValid());
+  configuration.SetEntrypoint("reportTimingsMain");
+
+  // Wait for 2 reports: the first one is the immediate callback of the first
+  // frame; the second one will exercise the batching logic.
+  fml::CountDownLatch reportLatch(2);
+  std::vector<int64_t> timestamps;
+  auto nativeTimingCallback = [&reportLatch,
+                               &timestamps](Dart_NativeArguments args) {
+    Dart_Handle exception = nullptr;
+    timestamps = tonic::DartConverter<std::vector<int64_t>>::FromArguments(
+        args, 0, exception);
+    reportLatch.CountDown();
+  };
+  AddNativeCallback("NativeReportTimingsCallback",
+                    CREATE_NATIVE_ENTRY(nativeTimingCallback));
+  RunEngine(shell.get(), std::move(configuration));
+
+  PumpOneFrame(shell.get());
+  PumpOneFrame(shell.get());
+
+  reportLatch.Wait();
+  shell.reset();
+
+  fml::TimePoint finish = fml::TimePoint::Now();
+  fml::TimeDelta ellapsed = finish - start;
+
+#if FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_RELEASE
+  // Our batch time is 1000ms. Hopefully the 800ms limit is relaxed enough to
+  // make it not too flaky.
+  ASSERT_TRUE(ellapsed >= fml::TimeDelta::FromMilliseconds(800));
+#else
+  // Our batch time is 100ms. Hopefully the 500ms limit is relaxed enough to
+  // make it not too flaky.
+  ASSERT_TRUE(ellapsed <= fml::TimeDelta::FromMilliseconds(500));
+#endif
+}
+
+TEST_F(ShellTest, ReportTimingsIsCalledImmediatelyAfterTheFirstFrame) {
+  auto settings = CreateSettingsForFixture();
+  std::unique_ptr<Shell> shell = CreateShell(settings);
 
   // Create the surface needed by rasterizer
   PlatformViewNotifyCreated(shell.get());
@@ -462,23 +507,261 @@ TEST_F(ShellTest, ReportTimingsIsCalledLaterInNonReleaseMode) {
                     CREATE_NATIVE_ENTRY(nativeTimingCallback));
   RunEngine(shell.get(), std::move(configuration));
 
-  PumpOneFrame(shell.get());
+  for (int i = 0; i < 10; i += 1) {
+    PumpOneFrame(shell.get());
+  }
 
   reportLatch.Wait();
   shell.reset();
 
-  fml::TimePoint finish = fml::TimePoint::Now();
-  fml::TimeDelta ellapsed = finish - start;
+  // Check for the immediate callback of the first frame that doesn't wait for
+  // the other 9 frames to be rasterized.
+  ASSERT_EQ(timestamps.size(), FrameTiming::kCount);
+}
 
-#if FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_RELEASE
-  // Our batch time is 1000ms. Hopefully the 800ms limit is relaxed enough to
-  // make it not too flaky.
-  ASSERT_TRUE(ellapsed >= fml::TimeDelta::FromMilliseconds(800));
-#else
-  // Our batch time is 100ms. Hopefully the 500ms limit is relaxed enough to
-  // make it not too flaky.
-  ASSERT_TRUE(ellapsed <= fml::TimeDelta::FromMilliseconds(500));
-#endif
+TEST_F(ShellTest, WaitForFirstFrame) {
+  auto settings = CreateSettingsForFixture();
+  std::unique_ptr<Shell> shell = CreateShell(settings);
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("emptyMain");
+
+  RunEngine(shell.get(), std::move(configuration));
+  PumpOneFrame(shell.get());
+  fml::Status result =
+      shell->WaitForFirstFrame(fml::TimeDelta::FromMilliseconds(1000));
+  ASSERT_TRUE(result.ok());
+}
+
+TEST_F(ShellTest, WaitForFirstFrameTimeout) {
+  auto settings = CreateSettingsForFixture();
+  std::unique_ptr<Shell> shell = CreateShell(settings);
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("emptyMain");
+
+  RunEngine(shell.get(), std::move(configuration));
+  fml::Status result =
+      shell->WaitForFirstFrame(fml::TimeDelta::FromMilliseconds(10));
+  ASSERT_EQ(result.code(), fml::StatusCode::kDeadlineExceeded);
+}
+
+TEST_F(ShellTest, WaitForFirstFrameMultiple) {
+  auto settings = CreateSettingsForFixture();
+  std::unique_ptr<Shell> shell = CreateShell(settings);
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("emptyMain");
+
+  RunEngine(shell.get(), std::move(configuration));
+  PumpOneFrame(shell.get());
+  fml::Status result =
+      shell->WaitForFirstFrame(fml::TimeDelta::FromMilliseconds(1000));
+  ASSERT_TRUE(result.ok());
+  for (int i = 0; i < 100; ++i) {
+    result = shell->WaitForFirstFrame(fml::TimeDelta::FromMilliseconds(1));
+    ASSERT_TRUE(result.ok());
+  }
+}
+
+/// Makes sure that WaitForFirstFrame works if we rendered a frame with the
+/// single-thread setup.
+TEST_F(ShellTest, WaitForFirstFrameInlined) {
+  Settings settings = CreateSettingsForFixture();
+  auto task_runner = CreateNewThread();
+  TaskRunners task_runners("test", task_runner, task_runner, task_runner,
+                           task_runner);
+  std::unique_ptr<Shell> shell =
+      CreateShell(std::move(settings), std::move(task_runners));
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("emptyMain");
+
+  RunEngine(shell.get(), std::move(configuration));
+  PumpOneFrame(shell.get());
+  fml::AutoResetWaitableEvent event;
+  task_runner->PostTask([&shell, &event] {
+    fml::Status result =
+        shell->WaitForFirstFrame(fml::TimeDelta::FromMilliseconds(1000));
+    ASSERT_EQ(result.code(), fml::StatusCode::kFailedPrecondition);
+    event.Signal();
+  });
+  ASSERT_FALSE(event.WaitWithTimeout(fml::TimeDelta::FromMilliseconds(1000)));
+}
+
+static size_t GetRasterizerResourceCacheBytesSync(Shell& shell) {
+  size_t bytes = 0;
+  fml::AutoResetWaitableEvent latch;
+  fml::TaskRunner::RunNowOrPostTask(
+      shell.GetTaskRunners().GetGPUTaskRunner(), [&]() {
+        if (auto rasterizer = shell.GetRasterizer()) {
+          bytes = rasterizer->GetResourceCacheMaxBytes().value_or(0U);
+        }
+        latch.Signal();
+      });
+  latch.Wait();
+  return bytes;
+}
+
+TEST_F(ShellTest, SetResourceCacheSize) {
+  Settings settings = CreateSettingsForFixture();
+  auto task_runner = CreateNewThread();
+  TaskRunners task_runners("test", task_runner, task_runner, task_runner,
+                           task_runner);
+  std::unique_ptr<Shell> shell =
+      CreateShell(std::move(settings), std::move(task_runners));
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("emptyMain");
+
+  RunEngine(shell.get(), std::move(configuration));
+  PumpOneFrame(shell.get());
+
+  EXPECT_EQ(GetRasterizerResourceCacheBytesSync(*shell),
+            static_cast<size_t>(24 * (1 << 20)));
+
+  fml::TaskRunner::RunNowOrPostTask(
+      shell->GetTaskRunners().GetPlatformTaskRunner(), [&shell]() {
+        shell->GetPlatformView()->SetViewportMetrics(
+            {1.0, 400, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+      });
+  PumpOneFrame(shell.get());
+
+  EXPECT_EQ(GetRasterizerResourceCacheBytesSync(*shell), 3840000U);
+
+  std::string request_json = R"json({
+                                "method": "Skia.setResourceCacheMaxBytes",
+                                "args": 10000
+                              })json";
+  std::vector<uint8_t> data(request_json.begin(), request_json.end());
+  auto platform_message = fml::MakeRefCounted<PlatformMessage>(
+      "flutter/skia", std::move(data), nullptr);
+  SendEnginePlatformMessage(shell.get(), std::move(platform_message));
+  PumpOneFrame(shell.get());
+  EXPECT_EQ(GetRasterizerResourceCacheBytesSync(*shell), 10000U);
+
+  fml::TaskRunner::RunNowOrPostTask(
+      shell->GetTaskRunners().GetPlatformTaskRunner(), [&shell]() {
+        shell->GetPlatformView()->SetViewportMetrics(
+            {1.0, 800, 400, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+      });
+  PumpOneFrame(shell.get());
+
+  EXPECT_EQ(GetRasterizerResourceCacheBytesSync(*shell), 10000U);
+}
+
+TEST_F(ShellTest, SetResourceCacheSizeEarly) {
+  Settings settings = CreateSettingsForFixture();
+  auto task_runner = CreateNewThread();
+  TaskRunners task_runners("test", task_runner, task_runner, task_runner,
+                           task_runner);
+  std::unique_ptr<Shell> shell =
+      CreateShell(std::move(settings), std::move(task_runners));
+
+  fml::TaskRunner::RunNowOrPostTask(
+      shell->GetTaskRunners().GetPlatformTaskRunner(), [&shell]() {
+        shell->GetPlatformView()->SetViewportMetrics(
+            {1.0, 400, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+      });
+  PumpOneFrame(shell.get());
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("emptyMain");
+
+  RunEngine(shell.get(), std::move(configuration));
+  PumpOneFrame(shell.get());
+
+  EXPECT_EQ(GetRasterizerResourceCacheBytesSync(*shell),
+            static_cast<size_t>(3840000U));
+}
+
+TEST_F(ShellTest, SetResourceCacheSizeNotifiesDart) {
+  Settings settings = CreateSettingsForFixture();
+  auto task_runner = CreateNewThread();
+  TaskRunners task_runners("test", task_runner, task_runner, task_runner,
+                           task_runner);
+  std::unique_ptr<Shell> shell =
+      CreateShell(std::move(settings), std::move(task_runners));
+
+  fml::TaskRunner::RunNowOrPostTask(
+      shell->GetTaskRunners().GetPlatformTaskRunner(), [&shell]() {
+        shell->GetPlatformView()->SetViewportMetrics(
+            {1.0, 400, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+      });
+  PumpOneFrame(shell.get());
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("testSkiaResourceCacheSendsResponse");
+
+  EXPECT_EQ(GetRasterizerResourceCacheBytesSync(*shell),
+            static_cast<size_t>(3840000U));
+
+  fml::AutoResetWaitableEvent latch;
+  AddNativeCallback("NotifyNative", CREATE_NATIVE_ENTRY([&latch](auto args) {
+                      latch.Signal();
+                    }));
+
+  RunEngine(shell.get(), std::move(configuration));
+  PumpOneFrame(shell.get());
+
+  latch.Wait();
+
+  EXPECT_EQ(GetRasterizerResourceCacheBytesSync(*shell),
+            static_cast<size_t>(10000U));
+}
+
+TEST_F(ShellTest, CanCreateImagefromDecompressedBytes) {
+  Settings settings = CreateSettingsForFixture();
+  auto task_runner = CreateNewThread();
+
+  TaskRunners task_runners("test", task_runner, task_runner, task_runner,
+                           task_runner);
+
+  std::unique_ptr<Shell> shell =
+      CreateShell(std::move(settings), std::move(task_runners));
+
+  // Create the surface needed by rasterizer
+  PlatformViewNotifyCreated(shell.get());
+
+  auto configuration = RunConfiguration::InferFromSettings(settings);
+  configuration.SetEntrypoint("canCreateImageFromDecompressedData");
+
+  fml::AutoResetWaitableEvent latch;
+  AddNativeCallback("NotifyWidthHeight",
+                    CREATE_NATIVE_ENTRY([&latch](auto args) {
+                      auto width = tonic::DartConverter<int>::FromDart(
+                          Dart_GetNativeArgument(args, 0));
+                      auto height = tonic::DartConverter<int>::FromDart(
+                          Dart_GetNativeArgument(args, 1));
+                      ASSERT_EQ(width, 10);
+                      ASSERT_EQ(height, 10);
+                      latch.Signal();
+                    }));
+
+  RunEngine(shell.get(), std::move(configuration));
+
+  latch.Wait();
 }
 
 }  // namespace testing

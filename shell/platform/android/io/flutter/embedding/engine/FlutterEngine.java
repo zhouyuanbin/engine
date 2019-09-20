@@ -12,6 +12,7 @@ import android.support.annotation.NonNull;
 import java.util.HashSet;
 import java.util.Set;
 
+import io.flutter.Log;
 import io.flutter.embedding.engine.dart.DartExecutor;
 import io.flutter.embedding.engine.plugins.PluginRegistry;
 import io.flutter.embedding.engine.plugins.activity.ActivityControlSurface;
@@ -19,6 +20,7 @@ import io.flutter.embedding.engine.plugins.broadcastreceiver.BroadcastReceiverCo
 import io.flutter.embedding.engine.plugins.contentprovider.ContentProviderControlSurface;
 import io.flutter.embedding.engine.plugins.service.ServiceControlSurface;
 import io.flutter.embedding.engine.renderer.FlutterRenderer;
+import io.flutter.embedding.engine.renderer.RenderSurface;
 import io.flutter.embedding.engine.systemchannels.AccessibilityChannel;
 import io.flutter.embedding.engine.systemchannels.KeyEventChannel;
 import io.flutter.embedding.engine.systemchannels.LifecycleChannel;
@@ -28,6 +30,7 @@ import io.flutter.embedding.engine.systemchannels.PlatformChannel;
 import io.flutter.embedding.engine.systemchannels.SettingsChannel;
 import io.flutter.embedding.engine.systemchannels.SystemChannel;
 import io.flutter.embedding.engine.systemchannels.TextInputChannel;
+import io.flutter.plugin.platform.PlatformViewsController;
 
 /**
  * A single Flutter execution environment.
@@ -49,8 +52,8 @@ import io.flutter.embedding.engine.systemchannels.TextInputChannel;
  * invoked twice on the same {@code FlutterEngine}.
  *
  * To start rendering Flutter content to the screen, use {@link #getRenderer()} to obtain a
- * {@link FlutterRenderer} and then attach a {@link FlutterRenderer.RenderSurface}.  Consider using
- * a {@link io.flutter.embedding.android.FlutterView} as a {@link FlutterRenderer.RenderSurface}.
+ * {@link FlutterRenderer} and then attach a {@link RenderSurface}.  Consider using
+ * a {@link io.flutter.embedding.android.FlutterView} as a {@link RenderSurface}.
  */
 // TODO(mattcarroll): re-evaluate system channel APIs - some are not well named or differentiated
 public class FlutterEngine implements LifecycleOwner {
@@ -87,10 +90,18 @@ public class FlutterEngine implements LifecycleOwner {
   @NonNull
   private final TextInputChannel textInputChannel;
 
+  // Platform Views.
+  @NonNull
+  private final PlatformViewsController platformViewsController;
+
+  // Engine Lifecycle.
+  @NonNull
   private final Set<EngineLifecycleListener> engineLifecycleListeners = new HashSet<>();
+  @NonNull
   private final EngineLifecycleListener engineLifecycleListener = new EngineLifecycleListener() {
     @SuppressWarnings("unused")
     public void onPreEngineRestart() {
+      Log.v(TAG, "onPreEngineRestart()");
       for (EngineLifecycleListener lifecycleListener : engineLifecycleListeners) {
         lifecycleListener.onPreEngineRestart();
       }
@@ -100,13 +111,16 @@ public class FlutterEngine implements LifecycleOwner {
   /**
    * Constructs a new {@code FlutterEngine}.
    *
+   * {@code FlutterMain.startInitialization} must be called before constructing a {@code FlutterEngine}
+   * to load the native libraries needed to attach to JNI.
+   *
    * A new {@code FlutterEngine} does not execute any Dart code automatically. See
    * {@link #getDartExecutor()} and {@link DartExecutor#executeDartEntrypoint(DartExecutor.DartEntrypoint)}
    * to begin executing Dart code within this {@code FlutterEngine}.
    *
    * A new {@code FlutterEngine} will not display any UI until a
-   * {@link io.flutter.embedding.engine.renderer.FlutterRenderer.RenderSurface} is registered. See
-   * {@link #getRenderer()} and {@link FlutterRenderer#attachToRenderSurface(FlutterRenderer.RenderSurface)}.
+   * {@link RenderSurface} is registered. See
+   * {@link #getRenderer()} and {@link FlutterRenderer#startRenderingToSurface(RenderSurface)}.
    *
    * A new {@code FlutterEngine} does not come with any Flutter plugins attached. To attach plugins,
    * see {@link #getPlugins()}.
@@ -118,7 +132,7 @@ public class FlutterEngine implements LifecycleOwner {
     flutterJNI.addEngineLifecycleListener(engineLifecycleListener);
     attachToJni();
 
-    this.dartExecutor = new DartExecutor(flutterJNI);
+    this.dartExecutor = new DartExecutor(flutterJNI, context.getAssets());
     this.dartExecutor.onAttachedToJNI();
 
     // TODO(mattcarroll): FlutterRenderer is temporally coupled to attach(). Remove that coupling if possible.
@@ -134,6 +148,8 @@ public class FlutterEngine implements LifecycleOwner {
     systemChannel = new SystemChannel(dartExecutor);
     textInputChannel = new TextInputChannel(dartExecutor);
 
+    platformViewsController = new PlatformViewsController();
+
     androidLifecycle = new FlutterEngineAndroidLifecycle(this);
     this.pluginRegistry = new FlutterEnginePluginRegistry(
       context.getApplicationContext(),
@@ -143,6 +159,7 @@ public class FlutterEngine implements LifecycleOwner {
   }
 
   private void attachToJni() {
+    Log.v(TAG, "Attaching to JNI.");
     // TODO(mattcarroll): update native call to not take in "isBackgroundView"
     flutterJNI.attachToNative(false);
 
@@ -163,6 +180,7 @@ public class FlutterEngine implements LifecycleOwner {
    * This {@code FlutterEngine} instance should be discarded after invoking this method.
    */
   public void destroy() {
+    Log.d(TAG, "Destroying.");
     // The order that these things are destroyed is important.
     pluginRegistry.destroy();
     dartExecutor.onDetachedFromJNI();
@@ -204,7 +222,7 @@ public class FlutterEngine implements LifecycleOwner {
    * The rendering system associated with this {@code FlutterEngine}.
    *
    * To render a Flutter UI that is produced by this {@code FlutterEngine}'s Dart code, attach
-   * a {@link io.flutter.embedding.engine.renderer.FlutterRenderer.RenderSurface} to this
+   * a {@link RenderSurface} to this
    * {@link FlutterRenderer}.
    */
   @NonNull
@@ -292,6 +310,15 @@ public class FlutterEngine implements LifecycleOwner {
   @NonNull
   public PluginRegistry getPlugins() {
     return pluginRegistry;
+  }
+
+  /**
+   * {@code PlatformViewsController}, which controls all platform views running within
+   * this {@code FlutterEngine}.
+   */
+  @NonNull
+  public PlatformViewsController getPlatformViewsController() {
+    return platformViewsController;
   }
 
   @NonNull

@@ -14,12 +14,15 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.VisibleForTesting;
 import android.util.Log;
+import android.view.WindowManager;
+
 import io.flutter.BuildConfig;
+import io.flutter.embedding.engine.FlutterJNI;
 import io.flutter.util.PathUtils;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.*;
 
 /**
@@ -52,6 +55,13 @@ public class FlutterMain {
     private static final String DEFAULT_LIBRARY = "libflutter.so";
     private static final String DEFAULT_KERNEL_BLOB = "kernel_blob.bin";
     private static final String DEFAULT_FLUTTER_ASSETS_DIR = "flutter_assets";
+
+    private static boolean isRunningInRobolectricTest = false;
+
+    @VisibleForTesting
+    public static void setIsRunningInRobolectricTest(boolean isRunningInRobolectricTest) {
+        FlutterMain.isRunningInRobolectricTest = isRunningInRobolectricTest;
+    }
 
     @NonNull
     private static String fromFlutterAssets(@NonNull String filePath) {
@@ -93,6 +103,10 @@ public class FlutterMain {
      * @param applicationContext The Android application context.
      */
     public static void startInitialization(@NonNull Context applicationContext) {
+        // Do nothing if we're running this in a Robolectric test.
+        if (isRunningInRobolectricTest) {
+            return;
+        }
         startInitialization(applicationContext, new Settings());
     }
 
@@ -102,6 +116,11 @@ public class FlutterMain {
      * @param settings Configuration settings.
      */
     public static void startInitialization(@NonNull Context applicationContext, @NonNull Settings settings) {
+        // Do nothing if we're running this in a Robolectric test.
+        if (isRunningInRobolectricTest) {
+            return;
+        }
+
         if (Looper.myLooper() != Looper.getMainLooper()) {
           throw new IllegalStateException("startInitialization must be called on the main thread");
         }
@@ -118,13 +137,17 @@ public class FlutterMain {
 
         System.loadLibrary("flutter");
 
+        VsyncWaiter
+            .getInstance((WindowManager) applicationContext.getSystemService(Context.WINDOW_SERVICE))
+            .init();
+
         // We record the initialization time using SystemClock because at the start of the
         // initialization we have not yet loaded the native library to call into dart_tools_api.h.
         // To get Timeline timestamp of the start of initialization we simply subtract the delta
         // from the Timeline timestamp at the current moment (the assumption is that the overhead
         // of the JNI call is negligible).
         long initTimeMillis = SystemClock.uptimeMillis() - initStartTimestampMillis;
-        nativeRecordStartTimestamp(initTimeMillis);
+        FlutterJNI.nativeRecordStartTimestamp(initTimeMillis);
     }
 
     /**
@@ -133,6 +156,11 @@ public class FlutterMain {
      * @param args Flags sent to the Flutter runtime.
      */
     public static void ensureInitializationComplete(@NonNull Context applicationContext, @Nullable String[] args) {
+        // Do nothing if we're running this in a Robolectric test.
+        if (isRunningInRobolectricTest) {
+            return;
+        }
+
         if (Looper.myLooper() != Looper.getMainLooper()) {
           throw new IllegalStateException("ensureInitializationComplete must be called on the main thread");
         }
@@ -156,12 +184,21 @@ public class FlutterMain {
             if (args != null) {
                 Collections.addAll(shellArgs, args);
             }
+
+            String kernelPath = null;
             if (BuildConfig.DEBUG) {
-                shellArgs.add("--" + SNAPSHOT_ASSET_PATH_KEY + "=" + PathUtils.getDataDirectory(applicationContext) + "/" + sFlutterAssetsDir);
+                String snapshotAssetPath = PathUtils.getDataDirectory(applicationContext) + File.separator + sFlutterAssetsDir;
+                kernelPath = snapshotAssetPath + File.separator + DEFAULT_KERNEL_BLOB;
+                shellArgs.add("--" + SNAPSHOT_ASSET_PATH_KEY + "=" + snapshotAssetPath);
                 shellArgs.add("--" + VM_SNAPSHOT_DATA_KEY + "=" + sVmSnapshotData);
                 shellArgs.add("--" + ISOLATE_SNAPSHOT_DATA_KEY + "=" + sIsolateSnapshotData);
             } else {
                 shellArgs.add("--" + AOT_SHARED_LIBRARY_NAME + "=" + sAotSharedLibraryName);
+
+                // Most devices can load the AOT shared library based on the library name
+                // with no directory path.  Provide a fully qualified path to the library
+                // as a workaround for devices where that fails.
+                shellArgs.add("--" + AOT_SHARED_LIBRARY_NAME + "=" + applicationInfo.nativeLibraryDir + File.separator + sAotSharedLibraryName);
             }
 
             shellArgs.add("--cache-dir-path=" + PathUtils.getCacheDirectory(applicationContext));
@@ -169,11 +206,10 @@ public class FlutterMain {
                 shellArgs.add("--log-tag=" + sSettings.getLogTag());
             }
 
-            String appBundlePath = findAppBundlePath(applicationContext);
             String appStoragePath = PathUtils.getFilesDir(applicationContext);
             String engineCachesPath = PathUtils.getCacheDirectory(applicationContext);
-            nativeInit(applicationContext, shellArgs.toArray(new String[0]),
-                appBundlePath, appStoragePath, engineCachesPath);
+            FlutterJNI.nativeInit(applicationContext, shellArgs.toArray(new String[0]),
+                kernelPath, appStoragePath, engineCachesPath);
 
             sInitialized = true;
         } catch (Exception e) {
@@ -192,6 +228,11 @@ public class FlutterMain {
         @NonNull Handler callbackHandler,
         @NonNull Runnable callback
     ) {
+        // Do nothing if we're running this in a Robolectric test.
+        if (isRunningInRobolectricTest) {
+            return;
+        }
+
         if (Looper.myLooper() != Looper.getMainLooper()) {
             throw new IllegalStateException("ensureInitializationComplete must be called on the main thread");
         }
@@ -217,9 +258,6 @@ public class FlutterMain {
             }
         }).start();
     }
-
-    private static native void nativeInit(Context context, String[] args, String bundlePath, String appStoragePath, String engineCachesPath);
-    private static native void nativeRecordStartTimestamp(long initTimeMillis);
 
     @NonNull
     private static ApplicationInfo getApplicationInfo(@NonNull Context applicationContext) {
@@ -259,9 +297,8 @@ public class FlutterMain {
     private static void initResources(@NonNull Context applicationContext) {
         new ResourceCleaner(applicationContext).start();
 
-        final String dataDirPath = PathUtils.getDataDirectory(applicationContext);
-
         if (BuildConfig.DEBUG) {
+            final String dataDirPath = PathUtils.getDataDirectory(applicationContext);
             final String packageName = applicationContext.getPackageName();
             final PackageManager packageManager = applicationContext.getPackageManager();
             final AssetManager assetManager = applicationContext.getResources().getAssets();
@@ -275,20 +312,18 @@ public class FlutterMain {
                 .addResource(fromFlutterAssets(DEFAULT_KERNEL_BLOB));
 
             sResourceExtractor.start();
-        } else {
-            // AOT modes obtain compiled Dart assets from a ELF library that does
-            // not need to be extracted out of the APK.
-            // Create an empty directory that can be passed as the bundle path
-            // in the engine RunBundle API.
-            new File(dataDirPath, sFlutterAssetsDir).mkdirs();
         }
     }
 
+    @NonNull
+    public static String findAppBundlePath() {
+        return sFlutterAssetsDir;
+    }
+
+    @Deprecated
     @Nullable
     public static String findAppBundlePath(@NonNull Context applicationContext) {
-        String dataDirectory = PathUtils.getDataDirectory(applicationContext);
-        File appBundle = new File(dataDirectory, sFlutterAssetsDir);
-        return appBundle.exists() ? appBundle.getPath() : null;
+        return sFlutterAssetsDir;
     }
 
     /**

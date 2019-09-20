@@ -39,15 +39,14 @@ public class TextInputPlugin {
     private boolean mRestartInputPending;
     @Nullable
     private InputConnection lastInputConnection;
-
+    @NonNull
     private PlatformViewsController platformViewsController;
 
     // When true following calls to createInputConnection will return the cached lastInputConnection if the input
     // target is a platform view. See the comments on lockPlatformViewInputConnection for more details.
     private boolean isInputConnectionLocked;
 
-    // TODO(mattcarroll): change @Nullable to @NonNull once new embedding integrates PlatformViewsController (#34286).
-    public TextInputPlugin(View view, @NonNull DartExecutor dartExecutor, @Nullable PlatformViewsController platformViewsController) {
+    public TextInputPlugin(View view, @NonNull DartExecutor dartExecutor, @NonNull PlatformViewsController platformViewsController) {
         mView = view;
         mImm = (InputMethodManager) view.getContext().getSystemService(
                 Context.INPUT_METHOD_SERVICE);
@@ -84,11 +83,9 @@ public class TextInputPlugin {
                 clearTextInputClient();
             }
         });
+
         this.platformViewsController = platformViewsController;
-        // TODO(mattcarroll): remove if-statement once new embedding integrates PlatformViewsController (#34286).
-        if (platformViewsController != null) {
-            platformViewsController.attachTextInputPlugin(this);
-        }
+        this.platformViewsController.attachTextInputPlugin(this);
     }
 
     @NonNull
@@ -127,10 +124,7 @@ public class TextInputPlugin {
      * The TextInputPlugin instance should not be used after calling this.
      */
     public void destroy() {
-        // TODO(mattcarroll): Remove if-statement once new embedding integrates PlatformViewsController (#34286).
-        if (platformViewsController != null) {
-            platformViewsController.detachTextInputPlugin();
-        }
+        platformViewsController.detachTextInputPlugin();
     }
 
     private static int inputTypeFromTextInputType(
@@ -161,6 +155,8 @@ public class TextInputPlugin {
             textType |= InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS;
         } else if (type.type == TextInputChannel.TextInputType.URL) {
             textType |= InputType.TYPE_TEXT_VARIATION_URI;
+        } else if (type.type == TextInputChannel.TextInputType.VISIBLE_PASSWORD) {
+            textType |= InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
         }
 
         if (obscureText) {
@@ -237,6 +233,21 @@ public class TextInputPlugin {
         return lastInputConnection;
     }
 
+    /**
+     * Clears a platform view text input client if it is the current input target.
+     *
+     * This is called when a platform view is disposed to make sure we're not hanging to a stale input
+     * connection.
+     */
+    public void clearPlatformViewClient(int platformViewId) {
+        if (inputTarget.type == InputTarget.Type.PLATFORM_VIEW && inputTarget.id == platformViewId) {
+            inputTarget = new InputTarget(InputTarget.Type.NO_TARGET, 0);
+            hideTextInput(mView);
+            mImm.restartInput(mView);
+            mRestartInputPending = false;
+        }
+    }
+
     private void showTextInput(View view) {
         view.requestFocus();
         mImm.showSoftInput(view, 0);
@@ -262,6 +273,10 @@ public class TextInputPlugin {
     }
 
     private void setPlatformViewTextInputClient(int platformViewId) {
+        // We need to make sure that the Flutter view is focused so that no imm operations get short circuited.
+        // Not asking for focus here specifically manifested in a but on API 28 devices where the platform view's
+        // request to show a keyboard was ignored.
+        mView.requestFocus();
         inputTarget = new InputTarget(InputTarget.Type.PLATFORM_VIEW, platformViewId);
         mImm.restartInput(mView);
         mRestartInputPending = false;

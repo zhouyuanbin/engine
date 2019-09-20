@@ -8,14 +8,15 @@ import android.content.res.AssetManager;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.UiThread;
-import android.util.Log;
 
 import java.nio.ByteBuffer;
 
+import io.flutter.Log;
 import io.flutter.embedding.engine.FlutterJNI;
 import io.flutter.plugin.common.BinaryMessenger;
 import io.flutter.plugin.common.StringCodec;
 import io.flutter.view.FlutterCallbackInformation;
+import io.flutter.view.FlutterMain;
 
 /**
  * Configures, bootstraps, and starts executing Dart code.
@@ -43,9 +44,13 @@ public class DartExecutor implements BinaryMessenger {
   @NonNull
   private final FlutterJNI flutterJNI;
   @NonNull
+  private final AssetManager assetManager;
+  @NonNull
   private final DartMessenger messenger;
   private boolean isApplicationRunning = false;
+  @Nullable
   private String isolateServiceId;
+  @Nullable
   private IsolateServiceIdListener isolateServiceIdListener;
 
   private final BinaryMessenger.BinaryMessageHandler isolateChannelMessageHandler =
@@ -59,8 +64,9 @@ public class DartExecutor implements BinaryMessenger {
         }
       };
 
-  public DartExecutor(@NonNull FlutterJNI flutterJNI) {
+  public DartExecutor(@NonNull FlutterJNI flutterJNI, @NonNull AssetManager assetManager) {
     this.flutterJNI = flutterJNI;
+    this.assetManager = assetManager;
     this.messenger = new DartMessenger(flutterJNI);
     messenger.setMessageHandler("flutter/isolate", isolateChannelMessageHandler);
   }
@@ -77,6 +83,7 @@ public class DartExecutor implements BinaryMessenger {
    * </ul>
    */
   public void onAttachedToJNI() {
+    Log.v(TAG, "Attached to JNI. Registering the platform message handler for this Dart execution context.");
     flutterJNI.setPlatformMessageHandler(messenger);
   }
 
@@ -88,6 +95,7 @@ public class DartExecutor implements BinaryMessenger {
    * the Dart execution context.
    */
   public void onDetachedFromJNI() {
+    Log.v(TAG, "Detached from JNI. De-registering the platform message handler for this Dart execution context.");
     flutterJNI.setPlatformMessageHandler(null);
   }
 
@@ -113,14 +121,13 @@ public class DartExecutor implements BinaryMessenger {
       return;
     }
 
+    Log.v(TAG, "Executing Dart entrypoint: " + dartEntrypoint);
+
     flutterJNI.runBundleAndSnapshotFromLibrary(
-        new String[]{
-            dartEntrypoint.pathToPrimaryBundle,
-            dartEntrypoint.pathToFallbackBundle
-        },
+        dartEntrypoint.pathToBundle,
         dartEntrypoint.dartEntrypointFunctionName,
         null,
-        dartEntrypoint.androidAssetManager
+        assetManager
     );
 
     isApplicationRunning = true;
@@ -139,11 +146,10 @@ public class DartExecutor implements BinaryMessenger {
       return;
     }
 
+    Log.v(TAG, "Executing Dart callback: " + dartCallback);
+
     flutterJNI.runBundleAndSnapshotFromLibrary(
-        new String[]{
-            dartCallback.pathToPrimaryBundle,
-            dartCallback.pathToFallbackBundle
-        },
+        dartCallback.pathToBundle,
         dartCallback.callbackHandle.callbackName,
         dartCallback.callbackHandle.callbackLibraryPath,
         dartCallback.androidAssetManager
@@ -194,12 +200,33 @@ public class DartExecutor implements BinaryMessenger {
   public void setMessageHandler(@NonNull String channel, @Nullable BinaryMessenger.BinaryMessageHandler handler) {
     messenger.setMessageHandler(channel, handler);
   }
+
+  /**
+   * Returns the number of pending channel callback replies.
+   *
+   * <p>When sending messages to the Flutter application using {@link BinaryMessenger#send(String,
+   * ByteBuffer, io.flutter.plugin.common.BinaryMessenger.BinaryReply)}, developers can optionally
+   * specify a reply callback if they expect a reply from the Flutter application.
+   *
+   * <p>This method tracks all the pending callbacks that are waiting for response, and is supposed
+   * to be called from the main thread (as other methods). Calling from a different thread could
+   * possibly capture an indeterministic internal state, so don't do it.
+   *
+   * <p>Currently, it's mainly useful for a testing framework like Espresso to determine whether all
+   * the async channel callbacks are handled and the app is idle.
+   */
+  @UiThread
+  public int getPendingChannelResponseCount() {
+    return messenger.getPendingChannelResponseCount();
+  }
+
   //------ END BinaryMessenger -----
 
   /**
    * Returns an identifier for this executor's primary isolate.  This identifier can be used
    * in queries to the Dart service protocol.
    */
+  @Nullable
   public String getIsolateServiceId() {
     return isolateServiceId;
   }
@@ -208,14 +235,14 @@ public class DartExecutor implements BinaryMessenger {
    * Callback interface invoked when the isolate identifier becomes available.
    */
   interface IsolateServiceIdListener {
-    void onIsolateServiceIdAvailable(String isolateServiceId);
+    void onIsolateServiceIdAvailable(@NonNull String isolateServiceId);
   }
 
   /**
    * Set a listener that will be notified when an isolate identifier is available for this
    * executor's primary isolate.
    */
-  public void setIsolateServiceIdListener(IsolateServiceIdListener listener) {
+  public void setIsolateServiceIdListener(@Nullable IsolateServiceIdListener listener) {
     isolateServiceIdListener = listener;
     if (isolateServiceIdListener != null && isolateServiceId != null) {
       isolateServiceIdListener.onIsolateServiceIdAvailable(isolateServiceId);
@@ -227,23 +254,19 @@ public class DartExecutor implements BinaryMessenger {
    * to find that entrypoint and other assets required for Dart execution.
    */
   public static class DartEntrypoint {
-    /**
-     * Standard Android AssetManager, provided from some {@code Context} or {@code Resources}.
-     */
     @NonNull
-    public final AssetManager androidAssetManager;
+    public static DartEntrypoint createDefault() {
+      return new DartEntrypoint(
+          FlutterMain.findAppBundlePath(),
+          "main"
+      );
+    }
 
     /**
-     * The first place that Dart will look for a given function or asset.
+     * The path within the AssetManager where the app will look for assets.
      */
     @NonNull
-    public final String pathToPrimaryBundle;
-
-    /**
-     * A secondary fallback location that Dart will look for a given function or asset.
-     */
-    @Nullable
-    public final String pathToFallbackBundle;
+    public final String pathToBundle;
 
     /**
      * The name of a Dart function to execute.
@@ -252,28 +275,35 @@ public class DartExecutor implements BinaryMessenger {
     public final String dartEntrypointFunctionName;
 
     public DartEntrypoint(
-        @NonNull AssetManager androidAssetManager,
         @NonNull String pathToBundle,
         @NonNull String dartEntrypointFunctionName
     ) {
-      this(
-          androidAssetManager,
-          pathToBundle,
-          null,
-          dartEntrypointFunctionName
-      );
+      this.pathToBundle = pathToBundle;
+      this.dartEntrypointFunctionName = dartEntrypointFunctionName;
     }
 
-    public DartEntrypoint(
-        @NonNull AssetManager androidAssetManager,
-        @NonNull String pathToPrimaryBundle,
-        @Nullable String pathToFallbackBundle,
-        @NonNull String dartEntrypointFunctionName
-    ) {
-      this.androidAssetManager = androidAssetManager;
-      this.pathToPrimaryBundle = pathToPrimaryBundle;
-      this.pathToFallbackBundle = pathToFallbackBundle;
-      this.dartEntrypointFunctionName = dartEntrypointFunctionName;
+    @Override
+    @NonNull
+    public String toString() {
+      return "DartEntrypoint( bundle path: " + pathToBundle + ", function: " + dartEntrypointFunctionName + " )";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+
+      DartEntrypoint that = (DartEntrypoint) o;
+
+      if (!pathToBundle.equals(that.pathToBundle)) return false;
+      return dartEntrypointFunctionName.equals(that.dartEntrypointFunctionName);
+    }
+
+    @Override
+    public int hashCode() {
+      int result = pathToBundle.hashCode();
+      result = 31 * result + dartEntrypointFunctionName.hashCode();
+      return result;
     }
   }
 
@@ -288,14 +318,9 @@ public class DartExecutor implements BinaryMessenger {
     public final AssetManager androidAssetManager;
 
     /**
-     * The first place that Dart will look for a given function or asset.
+     * The path within the AssetManager where the app will look for assets.
      */
-    public final String pathToPrimaryBundle;
-
-    /**
-     * A secondary fallback location that Dart will look for a given function or asset.
-     */
-    public final String pathToFallbackBundle;
+    public final String pathToBundle;
 
     /**
      * A Dart callback that was previously registered with the Dart VM.
@@ -304,27 +329,20 @@ public class DartExecutor implements BinaryMessenger {
 
     public DartCallback(
         @NonNull AssetManager androidAssetManager,
-        @NonNull String pathToPrimaryBundle,
-        @NonNull FlutterCallbackInformation callbackHandle
-    ) {
-      this(
-          androidAssetManager,
-          pathToPrimaryBundle,
-          null,
-          callbackHandle
-      );
-    }
-
-    public DartCallback(
-        @NonNull AssetManager androidAssetManager,
-        @NonNull String pathToPrimaryBundle,
-        @Nullable String pathToFallbackBundle,
+        @NonNull String pathToBundle,
         @NonNull FlutterCallbackInformation callbackHandle
     ) {
       this.androidAssetManager = androidAssetManager;
-      this.pathToPrimaryBundle = pathToPrimaryBundle;
-      this.pathToFallbackBundle = pathToFallbackBundle;
+      this.pathToBundle = pathToBundle;
       this.callbackHandle = callbackHandle;
+    }
+
+    @Override
+    @NonNull
+    public String toString() {
+      return "DartCallback( bundle path: " + pathToBundle
+          + ", library path: " + callbackHandle.callbackLibraryPath
+          + ", function: " + callbackHandle.callbackName + " )";
     }
   }
 }

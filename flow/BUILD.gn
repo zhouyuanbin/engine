@@ -12,8 +12,6 @@ source_set("flow") {
   sources = [
     "compositor_context.cc",
     "compositor_context.h",
-    "debug_print.cc",
-    "debug_print.h",
     "embedded_views.cc",
     "embedded_views.h",
     "instrumentation.cc",
@@ -114,6 +112,7 @@ executable("flow_unittests") {
     "layers/performance_overlay_layer_unittests.cc",
     "layers/physical_shape_layer_unittests.cc",
     "matrix_decomposition_unittests.cc",
+    "mutators_stack_unittests.cc",
     "raster_cache_unittests.cc",
   ]
 

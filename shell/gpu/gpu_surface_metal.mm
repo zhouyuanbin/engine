@@ -8,11 +8,13 @@
 
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
+#include "third_party/skia/include/ports/SkCFObject.h"
 
 namespace flutter {
 
-GPUSurfaceMetal::GPUSurfaceMetal(fml::scoped_nsobject<CAMetalLayer> layer)
-    : layer_(std::move(layer)) {
+GPUSurfaceMetal::GPUSurfaceMetal(GPUSurfaceDelegate* delegate,
+                                 fml::scoped_nsobject<CAMetalLayer> layer)
+    : delegate_(delegate), layer_(std::move(layer)) {
   if (!layer_) {
     FML_LOG(ERROR) << "Could not create metal surface because of invalid layer.";
     return;
@@ -38,6 +40,32 @@ GPUSurfaceMetal::GPUSurfaceMetal(fml::scoped_nsobject<CAMetalLayer> layer)
   }
 
   context_ = context;
+}
+
+GPUSurfaceMetal::GPUSurfaceMetal(GPUSurfaceDelegate* delegate,
+                                 sk_sp<GrContext> gr_context,
+                                 fml::scoped_nsobject<CAMetalLayer> layer)
+    : delegate_(delegate), layer_(std::move(layer)), context_(gr_context) {
+  if (!layer_) {
+    FML_LOG(ERROR) << "Could not create metal surface because of invalid layer.";
+    return;
+  }
+  if (!context_) {
+    FML_LOG(ERROR) << "Could not create metal surface because of invalid Skia metal context.";
+    return;
+  }
+
+  layer.get().pixelFormat = MTLPixelFormatBGRA8Unorm;
+
+  auto metal_device = fml::scoped_nsprotocol<id<MTLDevice>>([layer_.get().device retain]);
+  auto metal_queue = fml::scoped_nsprotocol<id<MTLCommandQueue>>([metal_device newCommandQueue]);
+
+  if (!metal_device || !metal_queue) {
+    FML_LOG(ERROR) << "Could not create metal device or queue.";
+    return;
+  }
+
+  command_queue_ = metal_queue;
 }
 
 GPUSurfaceMetal::~GPUSurfaceMetal() = default;
@@ -80,7 +108,7 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetal::AcquireFrame(const SkISize& size)
   }
 
   GrMtlTextureInfo metal_texture_info;
-  metal_texture_info.fTexture = metal_texture.get();
+  metal_texture_info.fTexture.reset(SkCFSafeRetain(metal_texture.get()));
 
   GrBackendRenderTarget metal_render_target(bounds.width * scale,   // width
                                             bounds.height * scale,  // height
@@ -111,11 +139,26 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetal::AcquireFrame(const SkISize& size)
     return nullptr;
   }
 
-  auto submit_callback = [drawable = next_drawable, command_buffer](
+  bool hasExternalViewEmbedder = delegate_->GetExternalViewEmbedder() != nullptr;
+
+  // External views need to present with transaction. When presenting with
+  // transaction, we have to block, otherwise we risk presenting the drawable
+  // after the CATransaction has completed.
+  // See:
+  // https://developer.apple.com/documentation/quartzcore/cametallayer/1478157-presentswithtransaction
+  // TODO(dnfield): only do this if transactions are actually being used.
+  // https://github.com/flutter/flutter/issues/24133
+  auto submit_callback = [drawable = next_drawable, command_buffer, hasExternalViewEmbedder](
                              const SurfaceFrame& surface_frame, SkCanvas* canvas) -> bool {
     canvas->flush();
-    [command_buffer.get() presentDrawable:drawable.get()];
-    [command_buffer.get() commit];
+    if (!hasExternalViewEmbedder) {
+      [command_buffer.get() presentDrawable:drawable.get()];
+      [command_buffer.get() commit];
+    } else {
+      [command_buffer.get() commit];
+      [command_buffer.get() waitUntilScheduled];
+      [drawable.get() present];
+    }
     return true;
   };
 
@@ -134,6 +177,11 @@ SkMatrix GPUSurfaceMetal::GetRootTransformation() const {
 // |Surface|
 GrContext* GPUSurfaceMetal::GetContext() {
   return context_.get();
+}
+
+// |Surface|
+flutter::ExternalViewEmbedder* GPUSurfaceMetal::GetExternalViewEmbedder() {
+  return delegate_->GetExternalViewEmbedder();
 }
 
 // |Surface|
