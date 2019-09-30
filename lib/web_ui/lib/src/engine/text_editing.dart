@@ -203,12 +203,30 @@ class TextEditingElement {
   /// See [TextEditingElement.persistent] to understand what persistent mode is.
   TextEditingElement(this.owner);
 
+  /// Timer that times when to set the location of the input text.
+  ///
+  /// This is only used for iOS. In iOS, virtual keyboard shifts the screen.
+  /// There is no callback to know if the keyboard is up and how much the screen
+  /// has shifted. Therefore instead of listening to the shift and passing this
+  /// information to Flutter Framework, we are trying to stop the shift.
+  ///
+  /// In iOS, the virtual keyboard shifts the screen up if the focused input
+  /// element is under the keyboard or very close to the keyboard. Before the
+  /// focus is called we are positioning it offscreen. The location of the input
+  /// in iOS is set to correct place, 100ms after focus. We use this timer for
+  /// timing this delay.
+  Timer _positionInputElementTimer;
+  static const Duration _delayBeforePositioning =
+      const Duration(milliseconds: 100);
+
   final HybridTextEditing owner;
   bool _enabled = false;
 
   html.HtmlElement domElement;
   EditingState _lastEditingState;
   _OnChangeCallback _onChange;
+
+  SelectionChangeDetection _selectionDetection;
 
   final List<StreamSubscription<html.Event>> _subscriptions =
       <StreamSubscription<html.Event>>[];
@@ -222,20 +240,22 @@ class TextEditingElement {
   /// On iOS, sets the location of the input element after focusing on it.
   ///
   /// On iOS, keyboard causes scrolling in the UI. This scrolling does not
-  /// trigger an event. In order to position the input element correctly, it is
+  /// trigger an event. In order not to trigger a shift on the page, it is
   /// important we set it's final location after focusing on it (after keyboard
   /// is up).
   ///
-  /// This method is called in the end of the 'touchend' event, therefore it is
-  /// called after the editing state is set.
+  /// This method is called after a delay.
+  /// See [_positionInputElementTimer].
   void configureInputElementForIOS() {
     if (browserEngine != BrowserEngine.webkit ||
         operatingSystem != OperatingSystem.iOs) {
-      // Only relevant on Safari.
+      // Only relevant on Safari-based on iOS.
       return;
     }
+
     if (domElement != null) {
       owner.setStyle(domElement);
+      owner.inputPositioned = true;
     }
   }
 
@@ -255,6 +275,7 @@ class TextEditingElement {
 
     _initDomElement(inputConfig);
     _enabled = true;
+    _selectionDetection = SelectionChangeDetection(domElement);
     _onChange = onChange;
 
     // Chrome on Android will hide the onscreen keyboard when you tap outside
@@ -274,6 +295,9 @@ class TextEditingElement {
       }));
     }
 
+    if (owner.doesKeyboardShiftInput) {
+      _preventShiftDuringFocus();
+    }
     domElement.focus();
 
     if (_lastEditingState != null) {
@@ -284,6 +308,18 @@ class TextEditingElement {
     _subscriptions
       ..add(html.document.onSelectionChange.listen(_handleChange))
       ..add(domElement.onInput.listen(_handleChange));
+
+    // In Firefox, when cursor moves, nor selectionChange neither onInput
+    // events are triggered. We are listening to keyup event to decide
+    // if the user shifted the cursor.
+    // See [SelectionChangeDetection].
+    if (browserEngine == BrowserEngine.firefox) {
+      _subscriptions.add(domElement.onKeyUp.listen((event) {
+        if (_selectionDetection.detectChange()) {
+          _handleChange(event);
+        }
+      }));
+    }
   }
 
   /// Disables the element so it's no longer used for text editing.
@@ -299,7 +335,11 @@ class TextEditingElement {
       _subscriptions[i].cancel();
     }
     _subscriptions.clear();
+    _positionInputElementTimer?.cancel();
+    _positionInputElementTimer = null;
+    owner.inputPositioned = false;
     _removeDomElement();
+    _selectionDetection = null;
   }
 
   void _initDomElement(InputConfiguration inputConfig) {
@@ -326,6 +366,32 @@ class TextEditingElement {
 
   void _refocus() {
     domElement.focus();
+  }
+
+  void _preventShiftDuringFocus() {
+    // Position the element outside of the page before focusing on it.
+    //
+    // See [_positionInputElementTimer].
+    owner.setStyleOutsideOfScreen(domElement);
+
+    _subscriptions.add(domElement.onFocus.listen((_) {
+      // Cancel previous timer if exists.
+      _positionInputElementTimer?.cancel();
+      _positionInputElementTimer = Timer(_delayBeforePositioning, () {
+        if (textEditing.inputElementNeedsToBePositioned) {
+          configureInputElementForIOS();
+        }
+      });
+
+      // When the virtual keyboard is closed on iOS, onBlur is triggered.
+      _subscriptions.add(domElement.onBlur.listen((_) {
+        // Cancel the timer since there is no need to set the location of the
+        // input element anymore. It needs to be focused again to be editable
+        // by the user.
+        _positionInputElementTimer?.cancel();
+        _positionInputElementTimer = null;
+      }));
+    }));
   }
 
   void setEditingState(EditingState editingState) {
@@ -362,8 +428,11 @@ class TextEditingElement {
         break;
     }
 
-    // Safari on iOS requires that we focus explicitly. Otherwise, the on-screen
-    // keyboard won't show up.
+    if (owner.inputElementNeedsToBePositioned) {
+      _preventShiftDuringFocus();
+    }
+
+    // Re-focuses when setting editing state.
     domElement.focus();
   }
 
@@ -583,8 +652,16 @@ class HybridTextEditing {
   /// Also used to define if a keyboard is needed.
   bool _isEditing = false;
 
-  /// Flag indicating if the flutter framework requested a keyboard.
-  bool get needsKeyboard => _isEditing;
+  /// Indicates whether the input element needs to be positioned.
+  ///
+  /// See [TextEditingElement._delayBeforePositioning].
+  bool get inputElementNeedsToBePositioned =>
+      !inputPositioned && _isEditing && doesKeyboardShiftInput;
+
+  /// Flag indicating whether the input element's position is set.
+  ///
+  /// See [inputElementNeedsToBePositioned].
+  bool inputPositioned = false;
 
   Map<String, dynamic> _configuration;
 
@@ -710,15 +787,30 @@ class HybridTextEditing {
     );
   }
 
+  /// Positioning of input element is only done if we are not expecting input
+  /// to be shifted by a virtual keyboard or if the input is already positioned.
+  ///
+  /// Otherwise positioning will be done after focusing on the input.
+  /// See [TextEditingElement._delayBeforePositioning].
+  bool get _canPositionInput => inputPositioned || !doesKeyboardShiftInput;
+
+  /// Indicates whether virtual keyboard shifts the location of input element.
+  ///
+  /// Value decided using the operating system and the browser engine.
+  ///
+  /// In iOS, the virtual keyboard might shifts the screen up to make input
+  /// visible depending on the location of the focused input element.
+  bool get doesKeyboardShiftInput =>
+      browserEngine == BrowserEngine.webkit &&
+      operatingSystem == OperatingSystem.iOs;
+
   /// These style attributes are dynamic throughout the life time of an input
   /// element.
   ///
   /// They are changed depending on the messages coming from method calls:
   /// "TextInput.setStyle", "TextInput.setEditableSizeAndTransform".
   void _setDynamicStyleAttributes(html.HtmlElement domElement) {
-    if (_editingLocationAndSize != null &&
-        !(browserEngine == BrowserEngine.webkit &&
-            operatingSystem == OperatingSystem.iOs)) {
+    if (_editingLocationAndSize != null && _canPositionInput) {
       setStyle(domElement);
     }
   }
@@ -739,6 +831,19 @@ class HybridTextEditing {
       ..textAlign = _editingStyle.align
       ..font = font()
       ..transform = transformCss;
+  }
+
+  // TODO(flutter_web): After the browser closes and re-opens the virtual
+  // shifts the page in iOS. Call this method from visibility change listener
+  // attached to body.
+  /// Set the dom element's location somewhere outside of the screen.
+  ///
+  /// This is useful for not triggering a scroll when iOS virtual keyboard is
+  /// coming up.
+  ///
+  /// See [TextEditingElement._delayBeforePositioning].
+  void setStyleOutsideOfScreen(html.HtmlElement domElement) {
+    domElement.style.transform = 'translate(-9999px, -9999px)';
   }
 
   html.InputElement createInputElement() {
@@ -785,8 +890,6 @@ class _EditingStyle {
 ///
 /// This information is received via "TextInput.setEditableSizeAndTransform"
 /// message. Framework currently sends this information on paint.
-// TODO(flutter_web): send the location during the scroll for more frequent
-// updates from the framework.
 class _EditableSizeAndTransform {
   _EditableSizeAndTransform({
     @required this.width,
@@ -797,4 +900,63 @@ class _EditableSizeAndTransform {
   final double width;
   final double height;
   final Float64List transform;
+}
+
+/// Detects changes in text selection.
+///
+/// Currently only used in Firefox.
+///
+/// In Firefox, when cursor moves, neither selectionChange nor onInput
+/// events are triggered. We are listening to keyup event. Selection start,
+/// end values are used to decide if the text cursor moved.
+///
+/// Specific keycodes are not checked since users/applicatins can bind their own
+/// keys to move the text cursor.
+class SelectionChangeDetection {
+  final html.HtmlElement _domElement;
+  int _start = -1;
+  int _end = -1;
+
+  SelectionChangeDetection(this._domElement) {
+    if (_domElement is html.InputElement) {
+      html.InputElement element = _domElement;
+      _saveSelection(element.selectionStart, element.selectionEnd);
+    } else if (_domElement is html.TextAreaElement) {
+      html.TextAreaElement element = _domElement;
+      _saveSelection(element.selectionStart, element.selectionEnd);
+    } else {
+      throw UnsupportedError('Initialized with unsupported input type');
+    }
+  }
+
+  /// Decides if the selection has changed (cursor moved) compared to the
+  /// previous values.
+  ///
+  /// After each keyup, the start/end values of the selection is compared to the
+  /// previously saved start/end values.
+  bool detectChange() {
+    if (_domElement is html.InputElement) {
+      html.InputElement element = _domElement;
+      return _compareSelection(element.selectionStart, element.selectionEnd);
+    }
+    if (_domElement is html.TextAreaElement) {
+      html.TextAreaElement element = _domElement;
+      return _compareSelection(element.selectionStart, element.selectionEnd);
+    }
+    throw UnsupportedError('Unsupported input type');
+  }
+
+  void _saveSelection(int selectionStart, int selectionEnd) {
+    _start = selectionStart;
+    _end = selectionEnd;
+  }
+
+  bool _compareSelection(int selectionStart, int selectionEnd) {
+    if (selectionStart != _start || selectionEnd != _end) {
+      _saveSelection(selectionStart, selectionEnd);
+      return true;
+    } else {
+      return false;
+    }
+  }
 }
