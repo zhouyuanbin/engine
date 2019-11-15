@@ -13,31 +13,38 @@
 #include "flutter/fml/macros.h"
 #include "flutter/fml/platform/darwin/scoped_nsobject.h"
 #include "flutter/shell/common/platform_view.h"
+#include "ios_gl_render_target.h"
 
 namespace flutter {
 
 class IOSGLContext {
  public:
   IOSGLContext();
-  IOSGLContext(EAGLSharegroup* sharegroup);
 
   ~IOSGLContext();
 
-  bool MakeCurrent();
+  std::unique_ptr<IOSGLRenderTarget> CreateRenderTarget(
+      fml::scoped_nsobject<CAEAGLLayer> layer);
 
-  bool BindRenderbufferStorage(fml::scoped_nsobject<CAEAGLLayer> layer);
+  std::unique_ptr<RendererContextSwitchManager::RendererContextSwitch>
+  MakeCurrent();
+
+  std::unique_ptr<RendererContextSwitchManager::RendererContextSwitch>
+  ResourceMakeCurrent();
+
+  std::shared_ptr<IOSGLContextSwitchManager> GetIOSGLContextSwitchManager() {
+    return renderer_context_switch_manager_;
+  }
 
   sk_sp<SkColorSpace> ColorSpace() const { return color_space_; }
 
-  std::unique_ptr<IOSGLContext> MakeSharedContext();
-
-  fml::WeakPtr<IOSGLContext> GetWeakPtr();
+  fml::scoped_nsobject<EAGLContext> GetContext() const {
+    return renderer_context_switch_manager_->GetContext();
+  }
 
  private:
-  fml::scoped_nsobject<EAGLContext> context_;
   sk_sp<SkColorSpace> color_space_;
-
-  std::unique_ptr<fml::WeakPtrFactory<IOSGLContext>> weak_factory_;
+  std::shared_ptr<IOSGLContextSwitchManager> renderer_context_switch_manager_;
 
   FML_DISALLOW_COPY_AND_ASSIGN(IOSGLContext);
 };

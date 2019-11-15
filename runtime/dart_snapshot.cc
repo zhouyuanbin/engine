@@ -6,7 +6,6 @@
 
 #include <sstream>
 
-#include "flutter/common/runtime.h"
 #include "flutter/fml/native_library.h"
 #include "flutter/fml/paths.h"
 #include "flutter/fml/trace_event.h"
@@ -179,10 +178,6 @@ fml::RefPtr<DartSnapshot> DartSnapshot::IsolateSnapshotFromSettings(
     return snapshot;
   }
   return nullptr;
-}
-
-fml::RefPtr<DartSnapshot> DartSnapshot::Empty() {
-  return fml::MakeRefCounted<DartSnapshot>(nullptr, nullptr);
 }
 
 DartSnapshot::DartSnapshot(std::shared_ptr<const fml::Mapping> data,

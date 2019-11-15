@@ -118,7 +118,10 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 
   NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
   [center removeObserver:self name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
-  [_flutterViewControllerWillDeallocObserver release];
+  if (_flutterViewControllerWillDeallocObserver) {
+    [center removeObserver:_flutterViewControllerWillDeallocObserver];
+    [_flutterViewControllerWillDeallocObserver release];
+  }
 
   [super dealloc];
 }
@@ -172,22 +175,45 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 
 - (void)setViewController:(FlutterViewController*)viewController {
   FML_DCHECK(self.iosPlatformView);
-  _viewController = [viewController getWeakPtr];
+  _viewController =
+      viewController ? [viewController getWeakPtr] : fml::WeakPtr<FlutterViewController>();
   self.iosPlatformView->SetOwnerViewController(_viewController);
   [self maybeSetupPlatformViewChannels];
 
-  self.flutterViewControllerWillDeallocObserver =
-      [[NSNotificationCenter defaultCenter] addObserverForName:FlutterViewControllerWillDealloc
-                                                        object:viewController
-                                                         queue:[NSOperationQueue mainQueue]
-                                                    usingBlock:^(NSNotification* note) {
-                                                      [self notifyViewControllerDeallocated];
-                                                    }];
+  if (viewController) {
+    __block FlutterEngine* blockSelf = self;
+    self.flutterViewControllerWillDeallocObserver =
+        [[NSNotificationCenter defaultCenter] addObserverForName:FlutterViewControllerWillDealloc
+                                                          object:viewController
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification* note) {
+                                                        [blockSelf notifyViewControllerDeallocated];
+                                                      }];
+  } else {
+    self.flutterViewControllerWillDeallocObserver = nil;
+  }
+}
+
+- (void)setFlutterViewControllerWillDeallocObserver:(id<NSObject>)observer {
+  if (observer != _flutterViewControllerWillDeallocObserver) {
+    if (_flutterViewControllerWillDeallocObserver) {
+      [[NSNotificationCenter defaultCenter]
+          removeObserver:_flutterViewControllerWillDeallocObserver];
+      [_flutterViewControllerWillDeallocObserver release];
+    }
+    _flutterViewControllerWillDeallocObserver = [observer retain];
+  }
 }
 
 - (void)notifyViewControllerDeallocated {
+  [[self lifecycleChannel] sendMessage:@"AppLifecycleState.detached"];
   if (!_allowHeadlessExecution) {
     [self destroyContext];
+  } else {
+    flutter::PlatformViewIOS* platform_view = [self iosPlatformView];
+    if (platform_view) {
+      platform_view->SetOwnerViewController({});
+    }
   }
   _viewController.reset();
 }
@@ -527,6 +553,7 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 - (flutter::Rasterizer::Screenshot)takeScreenshot:(flutter::Rasterizer::ScreenshotType)type
                                   asBase64Encoded:(BOOL)base64Encode {
   FML_DCHECK(_shell) << "Cannot takeScreenshot without a shell";
+  NSLog(@"NSLog take screenshoit");
   return _shell->Screenshot(type, base64Encode);
 }
 
