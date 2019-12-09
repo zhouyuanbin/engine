@@ -1,4 +1,4 @@
-Signature: ca2f5a478a350df271bc591b2a64d1e6
+Signature: 6daeaf1ba161a771918102a7ef9c0889
 
 UNUSED LICENSES:
 
@@ -7619,6 +7619,7 @@ FILE: ../../../third_party/dart/runtime/vm/compiler/backend/sexpression_test.cc
 FILE: ../../../third_party/dart/runtime/vm/compiler/backend/slot_test.cc
 FILE: ../../../third_party/dart/runtime/vm/compiler/backend/type_propagator_test.cc
 FILE: ../../../third_party/dart/runtime/vm/compiler/backend/typed_data_aot_test.cc
+FILE: ../../../third_party/dart/runtime/vm/compiler/backend/yield_position_test.cc
 FILE: ../../../third_party/dart/runtime/vm/compiler/ffi.cc
 FILE: ../../../third_party/dart/runtime/vm/compiler/ffi.h
 FILE: ../../../third_party/dart/runtime/vm/compiler/frontend/bytecode_fingerprints.cc
@@ -7698,6 +7699,7 @@ FILE: ../../../third_party/dart/sdk/lib/ffi/dynamic_library.dart
 FILE: ../../../third_party/dart/sdk/lib/ffi/ffi.dart
 FILE: ../../../third_party/dart/sdk/lib/ffi/native_type.dart
 FILE: ../../../third_party/dart/sdk/lib/ffi/struct.dart
+FILE: ../../../third_party/dart/sdk/lib/internal/errors.dart
 FILE: ../../../third_party/dart/sdk/lib/wasm/wasm.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/_internal/js_runtime/lib/rti.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/_internal/js_runtime/lib/shared/recipe_syntax.dart
@@ -7710,6 +7712,7 @@ FILE: ../../../third_party/dart/sdk_nnbd/lib/ffi/dynamic_library.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/ffi/ffi.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/ffi/native_type.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/ffi/struct.dart
+FILE: ../../../third_party/dart/sdk_nnbd/lib/internal/errors.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/wasm/wasm.dart
 ----------------------------------------------------------------------------------------------------
 Copyright (c) 2019, the Dart project authors.  Please see the AUTHORS file
@@ -8184,7 +8187,6 @@ FILE: ../../../third_party/dart/sdk/lib/web_gl/dart2js/web_gl_dart2js.dart
 FILE: ../../../third_party/dart/sdk/lib/web_sql/dart2js/web_sql_dart2js.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/_http/crypto.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/_http/http_date.dart
-FILE: ../../../third_party/dart/sdk_nnbd/lib/_internal/js_dev_runtime/libraries.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/_internal/js_dev_runtime/patch/async_patch.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/_internal/js_dev_runtime/patch/core_patch.dart
 FILE: ../../../third_party/dart/sdk_nnbd/lib/_internal/js_dev_runtime/patch/isolate_patch.dart

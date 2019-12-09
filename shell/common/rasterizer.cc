@@ -151,21 +151,20 @@ void Rasterizer::Draw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline) {
   }
 }
 
-sk_sp<SkImage> Rasterizer::MakeRasterSnapshot(sk_sp<SkPicture> picture,
-                                              SkISize picture_size) {
+sk_sp<SkImage> Rasterizer::DoMakeRasterSnapshot(
+    SkISize size,
+    std::function<void(SkCanvas*)> draw_callback) {
   TRACE_EVENT0("flutter", __FUNCTION__);
 
   sk_sp<SkSurface> surface;
   SkImageInfo image_info = SkImageInfo::MakeN32Premul(
-      picture_size.width(), picture_size.height(), SkColorSpace::MakeSRGB());
+      size.width(), size.height(), SkColorSpace::MakeSRGB());
   if (surface_ == nullptr || surface_->GetContext() == nullptr) {
     // Raster surface is fine if there is no on screen surface. This might
     // happen in case of software rendering.
     surface = SkSurface::MakeRaster(image_info);
   } else {
-    std::unique_ptr<RendererContextSwitchManager::RendererContextSwitch>
-        context_switch = surface_->MakeRenderContextCurrent();
-    if (!context_switch->GetSwitchResult()) {
+    if (!surface_->MakeRenderContextCurrent()) {
       return nullptr;
     }
 
@@ -181,8 +180,7 @@ sk_sp<SkImage> Rasterizer::MakeRasterSnapshot(sk_sp<SkPicture> picture,
     return nullptr;
   }
 
-  surface->getCanvas()->drawPicture(picture.get());
-
+  draw_callback(surface->getCanvas());
   surface->getCanvas()->flush();
 
   sk_sp<SkImage> device_snapshot;
@@ -203,6 +201,34 @@ sk_sp<SkImage> Rasterizer::MakeRasterSnapshot(sk_sp<SkPicture> picture,
   }
 
   return nullptr;
+}
+
+sk_sp<SkImage> Rasterizer::MakeRasterSnapshot(sk_sp<SkPicture> picture,
+                                              SkISize picture_size) {
+  return DoMakeRasterSnapshot(picture_size,
+                              [picture = std::move(picture)](SkCanvas* canvas) {
+                                canvas->drawPicture(picture);
+                              });
+}
+
+sk_sp<SkImage> Rasterizer::ConvertToRasterImage(sk_sp<SkImage> image) {
+  TRACE_EVENT0("flutter", __FUNCTION__);
+
+  // If the rasterizer does not have a surface with a GrContext, then it will
+  // be unable to render a cross-context SkImage.  The caller will need to
+  // create the raster image on the IO thread.
+  if (surface_ == nullptr || surface_->GetContext() == nullptr) {
+    return nullptr;
+  }
+
+  if (image == nullptr) {
+    return nullptr;
+  }
+
+  return DoMakeRasterSnapshot(image->dimensions(),
+                              [image = std::move(image)](SkCanvas* canvas) {
+                                canvas->drawImage(image, 0, 0);
+                              });
 }
 
 RasterStatus Rasterizer::DoDraw(
@@ -379,7 +405,7 @@ static sk_sp<SkSurface> CreateSnapshotSurface(GrContext* surface_context,
   return SkSurface::MakeRaster(image_info);
 }
 
-sk_sp<SkData> Rasterizer::ScreenshotLayerTreeAsImage(
+static sk_sp<SkData> ScreenshotLayerTreeAsImage(
     flutter::LayerTree* tree,
     flutter::CompositorContext& compositor_context,
     GrContext* surface_context,
@@ -401,23 +427,29 @@ sk_sp<SkData> Rasterizer::ScreenshotLayerTreeAsImage(
   SkMatrix root_surface_transformation;
   root_surface_transformation.reset();
 
-  auto frame = compositor_context.AcquireFrame(surface_context, canvas, nullptr,
-                                               root_surface_transformation,
-                                               false, nullptr);
-
+  // We want to ensure we call the base method for
+  // CompositorContext::AcquireFrame instead of the platform-specific method.
+  // Specifically, Fuchsia's CompositorContext handles the rendering surface
+  // itself which means that we will still continue to render to the onscreen
+  // surface if we don't call the base method.
+  auto frame = compositor_context.flutter::CompositorContext::AcquireFrame(
+      surface_context, canvas, nullptr, root_surface_transformation, false,
+      nullptr);
   canvas->clear(SK_ColorTRANSPARENT);
   frame->Raster(*tree, true);
-  ScreenshotFlushCanvas(*canvas);
+  canvas->flush();
 
   // Prepare an image from the surface, this image may potentially be on th GPU.
-  auto potentially_gpu_snapshot = MakeImageSnapshot(snapshot_surface);
+  auto potentially_gpu_snapshot = snapshot_surface->makeImageSnapshot();
   if (!potentially_gpu_snapshot) {
+    FML_LOG(ERROR) << "Screenshot: unable to make image screenshot";
     return nullptr;
   }
 
   // Copy the GPU image snapshot into CPU memory.
-  auto cpu_snapshot = MakeRasterImage(potentially_gpu_snapshot);
+  auto cpu_snapshot = potentially_gpu_snapshot->makeRasterImage();
   if (!cpu_snapshot) {
+    FML_LOG(ERROR) << "Screenshot: unable to make raster image";
     return nullptr;
   }
 
@@ -435,47 +467,6 @@ sk_sp<SkData> Rasterizer::ScreenshotLayerTreeAsImage(
   }
 
   return SkData::MakeWithCopy(pixmap.addr32(), pixmap.computeByteSize());
-}
-
-sk_sp<SkImage> Rasterizer::MakeImageSnapshot(
-    sk_sp<SkSurface> snapshot_surface) {
-  std::unique_ptr<RendererContextSwitchManager::RendererContextSwitch>
-      context_switch = surface_->MakeRenderContextCurrent();
-  if (!context_switch->GetSwitchResult()) {
-    return nullptr;
-  }
-  auto potentially_gpu_snapshot = snapshot_surface->makeImageSnapshot();
-  if (!potentially_gpu_snapshot) {
-    FML_LOG(ERROR) << "Screenshot: unable to make image screenshot";
-    return nullptr;
-  }
-  return potentially_gpu_snapshot;
-}
-
-sk_sp<SkImage> Rasterizer::MakeRasterImage(
-    sk_sp<SkImage> potentially_gpu_snapshot) {
-  std::unique_ptr<RendererContextSwitchManager::RendererContextSwitch>
-      context_switch = surface_->MakeRenderContextCurrent();
-  if (!context_switch->GetSwitchResult()) {
-    return nullptr;
-  }
-  auto cpu_snapshot = potentially_gpu_snapshot->makeRasterImage();
-  if (!cpu_snapshot) {
-    FML_LOG(ERROR) << "Screenshot: unable to make raster image";
-    return nullptr;
-  }
-  return cpu_snapshot;
-}
-
-void Rasterizer::ScreenshotFlushCanvas(SkCanvas& canvas) {
-  std::unique_ptr<RendererContextSwitchManager::RendererContextSwitch>
-      context_switch = surface_->MakeRenderContextCurrent();
-  if (!context_switch->GetSwitchResult()) {
-    FML_LOG(ERROR)
-        << "Screenshot: unable to switch gl context to flutter's context";
-    return;
-  }
-  canvas.flush();
 }
 
 Rasterizer::Screenshot Rasterizer::ScreenshotLastLayerTree(
@@ -520,7 +511,7 @@ Rasterizer::Screenshot Rasterizer::ScreenshotLastLayerTree(
   return Rasterizer::Screenshot{data, layer_tree->frame_size()};
 }
 
-void Rasterizer::SetNextFrameCallback(fml::closure callback) {
+void Rasterizer::SetNextFrameCallback(const fml::closure& callback) {
   next_frame_callback_ = callback;
 }
 
