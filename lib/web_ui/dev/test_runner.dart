@@ -60,6 +60,12 @@ class TestCommand extends Command<bool> {
 
     _copyTestFontsIntoWebUi();
     await _buildHostPage();
+    if (io.Platform.isWindows) {
+      // On Dart 2.7 or greater, it gives an error for not
+      // recognized "pub" version and asks for "pub" get.
+      // See: https://github.com/dart-lang/sdk/issues/39738
+      await _runPubGet();
+    }
 
     final List<FilePath> targets =
         this.targets.map((t) => FilePath.fromCwd(t)).toList();
@@ -83,6 +89,8 @@ class TestCommand extends Command<bool> {
 
   String get browser => argResults['browser'];
 
+  bool get isChrome => argResults['browser'] == 'chrome';
+
   /// When running screenshot tests writes them to the file system into
   /// ".dart_tool/goldens".
   bool get doUpdateScreenshotGoldens => argResults['update-screenshot-goldens'];
@@ -98,54 +106,76 @@ class TestCommand extends Command<bool> {
       'test',
     ));
 
-    // Separate screenshot tests from unit-tests. Screenshot tests must run
-    // one at a time. Otherwise, they will end up screenshotting each other.
-    // This is not an issue for unit-tests.
-    final FilePath failureSmokeTestPath = FilePath.fromWebUi(
-      'test/golden_tests/golden_failure_smoke_test.dart',
-    );
-    final List<FilePath> screenshotTestFiles = <FilePath>[];
-    final List<FilePath> unitTestFiles = <FilePath>[];
-
-    for (io.File testFile
-        in testDir.listSync(recursive: true).whereType<io.File>()) {
-      final FilePath testFilePath = FilePath.fromCwd(testFile.path);
-      if (!testFilePath.absolute.endsWith('_test.dart')) {
-        // Not a test file at all. Skip.
-        continue;
-      }
-      if (testFilePath == failureSmokeTestPath) {
-        // A smoke test that fails on purpose. Skip.
-        continue;
-      }
-      if (path.split(testFilePath.relativeToWebUi).contains('golden_tests')) {
-        screenshotTestFiles.add(testFilePath);
-      } else {
-        unitTestFiles.add(testFilePath);
-      }
-    }
-
-    // This test returns a non-zero exit code on purpose. Run it separately.
-    if (io.Platform.environment['CIRRUS_CI'] != 'true') {
-      await _runTestBatch(
-        <FilePath>[failureSmokeTestPath],
-        concurrency: 1,
-        expectFailure: true,
+    // Screenshot tests and smoke tests only run in Chrome.
+    if (isChrome) {
+      // Separate screenshot tests from unit-tests. Screenshot tests must run
+      // one at a time. Otherwise, they will end up screenshotting each other.
+      // This is not an issue for unit-tests.
+      final FilePath failureSmokeTestPath = FilePath.fromWebUi(
+        'test/golden_tests/golden_failure_smoke_test.dart',
       );
+      final List<FilePath> screenshotTestFiles = <FilePath>[];
+      final List<FilePath> unitTestFiles = <FilePath>[];
+
+      for (io.File testFile
+          in testDir.listSync(recursive: true).whereType<io.File>()) {
+        final FilePath testFilePath = FilePath.fromCwd(testFile.path);
+        if (!testFilePath.absolute.endsWith('_test.dart')) {
+          // Not a test file at all. Skip.
+          continue;
+        }
+        if (testFilePath == failureSmokeTestPath) {
+          // A smoke test that fails on purpose. Skip.
+          continue;
+        }
+
+        if (path.split(testFilePath.relativeToWebUi).contains('golden_tests')) {
+          screenshotTestFiles.add(testFilePath);
+        } else {
+          unitTestFiles.add(testFilePath);
+        }
+      }
+
+      // This test returns a non-zero exit code on purpose. Run it separately.
+      if (io.Platform.environment['CIRRUS_CI'] != 'true') {
+        await _runTestBatch(
+          <FilePath>[failureSmokeTestPath],
+          concurrency: 1,
+          expectFailure: true,
+        );
+        _checkExitCode();
+      }
+
+      // Run all unit-tests as a single batch.
+      await _runTestBatch(unitTestFiles, concurrency: 10, expectFailure: false);
       _checkExitCode();
-    }
 
-    // Run all unit-tests as a single batch.
-    await _runTestBatch(unitTestFiles, concurrency: 10, expectFailure: false);
-    _checkExitCode();
-
-    // Run screenshot tests one at a time.
-    for (FilePath testFilePath in screenshotTestFiles) {
-      await _runTestBatch(
-        <FilePath>[testFilePath],
-        concurrency: 1,
-        expectFailure: false,
-      );
+      // Run screenshot tests one at a time.
+      for (FilePath testFilePath in screenshotTestFiles) {
+        await _runTestBatch(
+          <FilePath>[testFilePath],
+          concurrency: 1,
+          expectFailure: false,
+        );
+        _checkExitCode();
+      }
+    } else {
+      final List<FilePath> unitTestFiles = <FilePath>[];
+      for (io.File testFile
+          in testDir.listSync(recursive: true).whereType<io.File>()) {
+        final FilePath testFilePath = FilePath.fromCwd(testFile.path);
+        if (!testFilePath.absolute.endsWith('_test.dart')) {
+          // Not a test file at all. Skip.
+          continue;
+        }
+        if (!path
+            .split(testFilePath.relativeToWebUi)
+            .contains('golden_tests')) {
+          unitTestFiles.add(testFilePath);
+        }
+      }
+      // Run all unit-tests as a single batch.
+      await _runTestBatch(unitTestFiles, concurrency: 10, expectFailure: false);
       _checkExitCode();
     }
   }
@@ -153,6 +183,22 @@ class TestCommand extends Command<bool> {
   void _checkExitCode() {
     if (io.exitCode != 0) {
       io.stderr.writeln('Process exited with exit code ${io.exitCode}.');
+      io.exit(1);
+    }
+  }
+
+  Future<void> _runPubGet() async {
+    final int exitCode = await runProcess(
+      environment.pubExecutable,
+      <String>[
+        'get',
+      ],
+      workingDirectory: environment.webUiRootDir.path,
+    );
+
+    if (exitCode != 0) {
+      io.stderr
+          .writeln('Failed to run pub get. Exited with exit code $exitCode');
       io.exit(1);
     }
   }
@@ -204,9 +250,7 @@ class TestCommand extends Command<bool> {
   }
 
   Future<void> _buildTests({List<FilePath> targets}) async {
-    final int exitCode = await runProcess(
-      environment.pubExecutable,
-      <String>[
+    List<String> arguments = <String>[
         'run',
         'build_runner',
         'build',
@@ -218,7 +262,10 @@ class TestCommand extends Command<bool> {
             '--build-filter=${path.relativeToWebUi}.js',
             '--build-filter=${path.relativeToWebUi}.browser_test.dart.js',
           ],
-      ],
+      ];
+    final int exitCode = await runProcess(
+      environment.pubExecutable,
+      arguments,
       workingDirectory: environment.webUiRootDir.path,
     );
 
@@ -241,7 +288,7 @@ class TestCommand extends Command<bool> {
       ...<String>['-r', 'compact'],
       '--concurrency=$concurrency',
       if (isDebug) '--pause-after-load',
-      '--platform=$browser',
+      '--platform=${SupportedBrowsers.instance.supportedBrowserToPlatform[browser]}',
       '--precompiled=${environment.webUiRootDir.path}/build',
       SupportedBrowsers.instance.browserToConfiguration[browser],
       '--',

@@ -23,7 +23,7 @@ abstract class _GlRenderer {
       Matrix4 transform,
       ui.Vertices vertices,
       ui.BlendMode blendMode,
-      ui.PaintData paint);
+      SurfacePaintData paint);
 
   void drawHairline(html.CanvasRenderingContext2D _ctx, Float32List positions);
 }
@@ -86,7 +86,7 @@ class _WebGlRenderer implements _GlRenderer {
       Matrix4 transform,
       ui.Vertices vertices,
       ui.BlendMode blendMode,
-      ui.PaintData paint) {
+      SurfacePaintData paint) {
     // Compute bounds of vertices.
     final Float32List positions = vertices.positions;
     ui.Rect bounds = _computeVerticesBounds(positions, transform);
@@ -617,8 +617,8 @@ class _OffscreenCanvas {
           height: heightInPixels,
         );
         _glCanvas.className = 'gl-canvas';
-        final double cssWidth = widthInPixels / html.window.devicePixelRatio;
-        final double cssHeight = heightInPixels / html.window.devicePixelRatio;
+        final double cssWidth = widthInPixels / EngineWindow.browserDevicePixelRatio;
+        final double cssHeight = heightInPixels / EngineWindow.browserDevicePixelRatio;
         _glCanvas.style
           ..position = 'absolute'
           ..width = '${cssWidth}px'

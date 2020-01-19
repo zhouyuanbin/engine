@@ -34,8 +34,18 @@ trap reboot EXIT
 ./fuchsia_ctl -d $device_name pave  -i $1
 
 # TODO(gw280): Enable tests using JIT runner
+for i in {1..10}; do
+  ./fuchsia_ctl -d $device_name test \
+      -f flutter_aot_runner-0.far    \
+      -f flutter_runner_tests-0.far  \
+      -t flutter_runner_tests && break || sleep 15;
+done
+
 ./fuchsia_ctl -d $device_name test \
-    -f flutter_aot_runner-0.far    \
-    -f flutter_runner_tests-0.far  \
-    -t flutter_runner_tests
+    -f fml_tests-0.far  \
+    -t fml_tests
+
+./fuchsia_ctl -d $device_name test \
+    -f flow_tests-0.far  \
+    -t flow_tests
 

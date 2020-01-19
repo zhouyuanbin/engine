@@ -51,22 +51,22 @@ class DomCanvas extends EngineCanvas with SaveElementStackTracking {
       ..right = '0'
       ..bottom = '0'
       ..left = '0'
-      ..backgroundColor = color.toCssString();
+      ..backgroundColor = colorToCssString(color);
     currentElement.append(box);
   }
 
   @override
-  void drawLine(ui.Offset p1, ui.Offset p2, ui.PaintData paint) {
+  void drawLine(ui.Offset p1, ui.Offset p2, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
   @override
-  void drawPaint(ui.PaintData paint) {
+  void drawPaint(SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
   @override
-  void drawRect(ui.Rect rect, ui.PaintData paint) {
+  void drawRect(ui.Rect rect, SurfacePaintData paint) {
     assert(paint.shader == null);
     final html.Element rectangle = html.Element.tag('draw-rect');
     assert(() {
@@ -104,7 +104,8 @@ class DomCanvas extends EngineCanvas with SaveElementStackTracking {
       ..transformOrigin = '0 0 0'
       ..transform = effectiveTransform;
 
-    final String cssColor = paint.color?.toCssString() ?? '#000000';
+    final String cssColor = paint.color == null ? '#000000'
+        : colorToCssString(paint.color);
 
     if (paint.maskFilter != null) {
       style.filter = 'blur(${paint.maskFilter.webOnlySigma}px)';
@@ -126,27 +127,27 @@ class DomCanvas extends EngineCanvas with SaveElementStackTracking {
   }
 
   @override
-  void drawRRect(ui.RRect rrect, ui.PaintData paint) {
+  void drawRRect(ui.RRect rrect, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
   @override
-  void drawDRRect(ui.RRect outer, ui.RRect inner, ui.PaintData paint) {
+  void drawDRRect(ui.RRect outer, ui.RRect inner, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
   @override
-  void drawOval(ui.Rect rect, ui.PaintData paint) {
+  void drawOval(ui.Rect rect, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
   @override
-  void drawCircle(ui.Offset c, double radius, ui.PaintData paint) {
+  void drawCircle(ui.Offset c, double radius, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
   @override
-  void drawPath(ui.Path path, ui.PaintData paint) {
+  void drawPath(ui.Path path, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
@@ -157,13 +158,13 @@ class DomCanvas extends EngineCanvas with SaveElementStackTracking {
   }
 
   @override
-  void drawImage(ui.Image image, ui.Offset p, ui.PaintData paint) {
+  void drawImage(ui.Image image, ui.Offset p, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
   @override
   void drawImageRect(
-      ui.Image image, ui.Rect src, ui.Rect dst, ui.PaintData paint) {
+      ui.Image image, ui.Rect src, ui.Rect dst, SurfacePaintData paint) {
     throw UnimplementedError();
   }
 
@@ -175,8 +176,13 @@ class DomCanvas extends EngineCanvas with SaveElementStackTracking {
   }
 
   @override
-  void drawVertices(ui.Vertices vertices, ui.BlendMode blendMode,
-      ui.PaintData paint) {
+  void drawVertices(
+      ui.Vertices vertices, ui.BlendMode blendMode, SurfacePaintData paint) {
     throw UnimplementedError();
+  }
+
+  @override
+  void endOfPaint() {
+    // No reuse of elements yet to handle here. Noop.
   }
 }

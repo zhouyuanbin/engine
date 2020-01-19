@@ -20,10 +20,17 @@ class EngineWindow extends ui.Window {
     }
 
     if (experimentalUseSkia) {
-      return html.window.devicePixelRatio;
+      return browserDevicePixelRatio;
     } else {
       return 1.0;
     }
+  }
+
+  /// Returns device pixel ratio returns by browser.
+  static double get browserDevicePixelRatio {
+    double ratio = html.window.devicePixelRatio;
+    // Guard against WebOS returning 0.
+    return (ratio == null || ratio == 0.0) ? 1.0 : ratio;
   }
 
   /// Overrides the default device pixel ratio.
@@ -92,8 +99,14 @@ class EngineWindow extends ui.Window {
   /// Simulates clicking the browser's back button.
   Future<void> webOnlyBack() => _browserHistory.back();
 
+  /// Lazily initialized when the `defaultRouteName` getter is invoked.
+  ///
+  /// The reason for the lazy initialization is to give enough time for the app to set [locationStrategy]
+  /// in `lib/src/ui/initialization.dart`.
+  String _defaultRouteName;
+
   @override
-  String get defaultRouteName => _browserHistory.currentPath;
+  String get defaultRouteName => _defaultRouteName ??= _browserHistory.currentPath;
 
   /// Change the strategy to use for handling browser history location.
   /// Setting this member will automatically update [_browserHistory].
@@ -151,15 +164,25 @@ class EngineWindow extends ui.Window {
           case 'SystemSound.play':
             // There are no default system sounds on web.
             return;
+          case 'Clipboard.setData':
+            ClipboardMessageHandler().setDataMethodCall(decoded);
+            return;
+          case 'Clipboard.getData':
+            ClipboardMessageHandler().getDataMethodCall(callback);
+            return;
         }
         break;
 
       case 'flutter/textinput':
-        textEditing.handleTextInput(data);
+        textEditing.channel.handleTextInput(data);
         return;
 
       case 'flutter/platform_views':
-        handlePlatformViewCall(data, callback);
+        if (experimentalUseSkia) {
+          rasterizer.viewEmbedder.handlePlatformViewCall(data, callback);
+        } else {
+          handlePlatformViewCall(data, callback);
+        }
         return;
 
       case 'flutter/accessibility':
@@ -275,15 +298,15 @@ class EngineWindow extends ui.Window {
   void render(ui.Scene scene) {
     if (experimentalUseSkia) {
       final LayerScene layerScene = scene;
-      _rasterizer.draw(layerScene.layerTree);
+      rasterizer.draw(layerScene.layerTree);
     } else {
       final SurfaceScene surfaceScene = scene;
       domRenderer.renderScene(surfaceScene.webOnlyRootElement);
     }
   }
 
-  final Rasterizer _rasterizer =
-      experimentalUseSkia ? Rasterizer(Surface()) : null;
+  @visibleForTesting
+  Rasterizer rasterizer = experimentalUseSkia ? Rasterizer(Surface()) : null;
 }
 
 /// The window singleton.
